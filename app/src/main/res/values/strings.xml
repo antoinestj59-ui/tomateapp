@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TOMATE</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_messages">Messages</string>
+    <string name="nav_nearby">Proximité</string>
+    <string name="nav_communities">Communautés</string>
+    <string name="nav_profile">Profil</string>
+</resources>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- tomato body -->
+    <path
+        android:fillColor="#C0392B"
+        android:pathData="M54,34 C68,34 82,45 82,61 C82,76 69,86 54,86 C39,86 26,76 26,61 C26,45 40,34 54,34 Z" />
+    <!-- highlight -->
+    <path
+        android:fillColor="#FF8A73"
+        android:pathData="M42,48 C46,44 52,43 56,45 C50,47 46,52 45,57 C42,55 40,51 42,48 Z" />
+    <!-- leaves -->
+    <path
+        android:fillColor="#4C6B3C"
+        android:pathData="M54,36 L44,26 L52,30 L54,22 L56,30 L64,26 Z" />
+</vector>
