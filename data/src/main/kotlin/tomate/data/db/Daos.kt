@@ -34,6 +34,13 @@ interface ProfileDao {
 
     @Query("DELETE FROM profiles WHERE isMe = 1")
     suspend fun deleteMe()
+
+    /** Rewrites a local identity (`local-…`) into the server account id. */
+    @Query("UPDATE profiles SET id = :newId, pendingSync = 1 WHERE id = :oldId")
+    suspend fun rekey(oldId: String, newId: String)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM profiles WHERE handle = :handle AND isMe = 0)")
+    suspend fun handleTaken(handle: String): Boolean
 }
 
 @Dao
@@ -70,6 +77,9 @@ interface PostDao {
 
     @Query("DELETE FROM posts WHERE pendingSync = 0")
     suspend fun clearSynced()
+
+    @Query("UPDATE posts SET authorId = :newId WHERE authorId = :oldId")
+    suspend fun reassignAuthor(oldId: String, newId: String)
 }
 
 @Dao
@@ -88,6 +98,9 @@ interface CommentDao {
 
     @Query("DELETE FROM comments WHERE postId = :postId AND pendingSync = 0")
     suspend fun clearSyncedForPost(postId: String)
+
+    @Query("UPDATE comments SET authorId = :newId WHERE authorId = :oldId")
+    suspend fun reassignAuthor(oldId: String, newId: String)
 }
 
 @Dao
@@ -118,6 +131,12 @@ interface CommunityDao {
 
     @Query("SELECT * FROM community_members_cache WHERE communityId = :communityId")
     suspend fun members(communityId: String): List<CommunityMemberCacheEntity>
+
+    @Query("UPDATE communities SET ownerId = :newId WHERE ownerId = :oldId")
+    suspend fun reassignOwner(oldId: String, newId: String)
+
+    @Query("UPDATE community_members_cache SET userId = :newId WHERE userId = :oldId")
+    suspend fun reassignMemberCache(oldId: String, newId: String)
 }
 
 @Dao
@@ -148,6 +167,9 @@ interface ConversationDao {
 
     @Query("SELECT COUNT(*) FROM conversations")
     suspend fun count(): Int
+
+    @Query("UPDATE conversation_members SET memberId = :newId WHERE memberId = :oldId")
+    suspend fun reassignMember(oldId: String, newId: String)
 }
 
 @Dao
@@ -187,6 +209,9 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE deliveryState = 'Pending' ORDER BY createdAt ASC LIMIT :limit")
     suspend fun pendingMessages(limit: Int): List<MessageEntity>
+
+    @Query("UPDATE messages SET senderId = :newId WHERE senderId = :oldId")
+    suspend fun reassignSender(oldId: String, newId: String)
 }
 
 @Dao
@@ -211,6 +236,10 @@ interface OutboxDao {
 
     @Query("SELECT * FROM outbox WHERE kind = :kind AND idempotencyKey = :key LIMIT 1")
     suspend fun byKey(kind: String, key: String): OutboxEntity?
+
+    /** Rewrites a local identity inside queued JSON payloads before they are sent. */
+    @Query("UPDATE outbox SET payload = REPLACE(payload, :oldId, :newId) WHERE payload LIKE '%' || :oldId || '%'")
+    suspend fun rekeyPayload(oldId: String, newId: String)
 }
 
 @Dao

@@ -64,6 +64,7 @@ class MessagingRepository(
     fun observePendingCount(): Flow<Int> = messageDao.observePendingCount()
 
     suspend fun refreshConversations(): Outcome<Int> {
+        if (session.isLocalAccount()) return Outcome.Success(0)
         return when (val response = api.select("conversations", listOf("select" to "*", "order" to "last_message_at.desc"))) {
             is Outcome.Failure -> response
             is Outcome.Success -> {
@@ -80,6 +81,7 @@ class MessagingRepository(
     }
 
     suspend fun refreshMessages(conversationId: String): Outcome<Int> {
+        if (session.isLocalAccount()) return Outcome.Success(0)
         val me = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
         val query = listOf(
             "conversation_id" to "eq.$conversationId",
@@ -111,7 +113,7 @@ class MessagingRepository(
         memberHandles: List<String>,
         isGroup: Boolean = memberHandles.size > 1,
     ): Outcome<Conversation> {
-        val me = session.ensureSession().getOrNull()?.userId
+        val me = session.ensureActor().getOrNull()?.userId
             ?: return Outcome.Failure(AppError.Unauthorized())
         val id = UUID.randomUUID().toString()
         val resolvedTitle = when {
@@ -138,6 +140,10 @@ class MessagingRepository(
             ConversationDto.serializer(),
             ConversationDto(id = id, title = resolvedTitle, isGroup = isGroup),
         )
+        if (SessionManager.isLocalId(me)) {
+            enqueue("conversation_create", id, payload)
+            return Outcome.Success(entity.toDomain())
+        }
         return when (val remote = api.insert("conversations", payload)) {
             is Outcome.Success -> Outcome.Success(entity.toDomain())
             is Outcome.Failure -> {
@@ -162,7 +168,7 @@ class MessagingRepository(
                 AppError.Validation("message_too_long", "Maximum $MAX_MESSAGE_LENGTH caractères."),
             )
         }
-        val me = session.ensureSession().getOrNull()?.userId
+        val me = session.ensureActor().getOrNull()?.userId
             ?: return Outcome.Failure(AppError.Unauthorized())
 
         val now = clock()
@@ -197,6 +203,13 @@ class MessagingRepository(
                 replyToId = replyToId,
             ),
         )
+        if (SessionManager.isLocalId(me)) {
+            // Stays Pending: the message exists locally and will leave through the outbox or a
+            // nearby transport. Nothing is claimed as delivered.
+            enqueue("message_send", clientId, payload)
+            updatePendingCount(conversationId)
+            return Outcome.Success(entity.toDomain())
+        }
         return when (val remote = api.insert("messages", payload)) {
             is Outcome.Success -> {
                 messageDao.updateDelivery(messageId, MessageDeliveryState.Delivered.name, TransportKind.Internet.name, null)

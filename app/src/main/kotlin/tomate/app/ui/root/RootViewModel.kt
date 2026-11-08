@@ -33,11 +33,14 @@ class RootViewModel(private val container: TomateContainer) : ViewModel() {
         val error: AppError? = null,
         val settings: TomateSettings = TomateSettings(),
         val e2eeStatus: E2eeStatus = E2eeStatus.NotConfigured,
+        /** Non-blocking message: account linked, pseudo taken server-side, etc. */
+        val notice: String? = null,
     )
 
     private val booting = MutableStateFlow(true)
     private val onboarding = MutableStateFlow(false)
     private val error = MutableStateFlow<AppError?>(null)
+    private val notice = MutableStateFlow<String?>(null)
 
     private val profileFlow = container.profiles.observeMe()
     private val pendingFlow = container.database.outboxDao().observeCount()
@@ -58,7 +61,8 @@ class RootViewModel(private val container: TomateContainer) : ViewModel() {
         onboarding,
         error,
         dataFlow,
-    ) { isBooting, needsOnboarding, currentError, data ->
+        notice,
+    ) { isBooting, needsOnboarding, currentError, data, currentNotice ->
         UiState(
             booting = isBooting,
             needsOnboarding = needsOnboarding,
@@ -68,6 +72,7 @@ class RootViewModel(private val container: TomateContainer) : ViewModel() {
             settings = data.settings,
             network = data.network,
             e2eeStatus = container.e2ee.status,
+            notice = currentNotice,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState())
 
@@ -91,17 +96,49 @@ class RootViewModel(private val container: TomateContainer) : ViewModel() {
                     error.value = result.error
                 }
             }
+            // A local account created offline is migrated as soon as the network allows it.
+            linkIfNeeded(notify = false)
             booting.value = false
         }
     }
 
     fun onOnboardingCompleted() {
         onboarding.value = false
-        viewModelScope.launch { runCatching { container.profiles.pullMyProfile() } }
+        viewModelScope.launch {
+            runCatching { container.profiles.pullMyProfile() }
+            linkIfNeeded(notify = true)
+        }
     }
 
     fun syncNow() {
-        viewModelScope.launch { runCatching { container.sync.drain() } }
+        viewModelScope.launch {
+            if (container.session.isLocalAccount()) {
+                linkIfNeeded(notify = true)
+            } else {
+                runCatching { container.sync.drain() }
+            }
+        }
+    }
+
+    private suspend fun linkIfNeeded(notify: Boolean) {
+        if (!container.session.isLocalAccount()) return
+        when (val result = container.account.linkIfNeeded()) {
+            is Outcome.Success -> when {
+                result.value.linked -> {
+                    notice.value = "Compte relié au réseau. Vos données locales et vos opérations en attente " +
+                        "vont se synchroniser automatiquement."
+                    runCatching { container.sync.drain() }
+                }
+                else -> Unit
+            }
+            is Outcome.Failure -> if (notify) {
+                if (!result.error.isOffline) notice.value = result.error.userMessage
+            }
+        }
+    }
+
+    fun dismissNotice() {
+        notice.value = null
     }
 
     fun setThemeMode(mode: ThemeMode) {

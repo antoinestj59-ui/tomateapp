@@ -66,6 +66,12 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
     fun refresh() {
         viewModelScope.launch {
             refreshing.value = true
+            if (container.session.isLocalAccount()) {
+                // Local account: nothing to fetch yet, the cached feed is the whole truth.
+                loading.value = false
+                refreshing.value = false
+                return@launch
+            }
             val result = container.feed.refreshFeed()
             if (result is Outcome.Failure) error.value = result.error
             runCatching { container.sync.drain() }

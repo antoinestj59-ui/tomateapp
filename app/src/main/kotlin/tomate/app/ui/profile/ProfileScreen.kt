@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -80,7 +81,7 @@ fun ProfileScreen(
                                 label = state.profile?.displayName ?: "?",
                                 size = 64,
                             )
-                            Spacer(Modifier.padding(horizontal = TomateSpacing.s))
+                            Spacer(Modifier.width(TomateSpacing.s))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = state.profile?.displayName ?: "Profil non configuré",
@@ -111,6 +112,17 @@ fun ProfileScreen(
 
             if (state.error != null) {
                 item { TomateInlineNotice(text = state.error!!.userMessage, tone = NoticeTone.Error) }
+            }
+
+            if (state.userId?.startsWith("local-") == true) {
+                item {
+                    TomateInlineNotice(
+                        text = "Compte local : créé hors connexion. Il sera relié automatiquement à Supabase dès " +
+                            "qu'une connexion sera disponible, sans perte de vos publications ni de vos messages. " +
+                            "Le pseudo sera alors vérifié en ligne.",
+                        tone = NoticeTone.Info,
+                    )
+                }
             }
 
             item {

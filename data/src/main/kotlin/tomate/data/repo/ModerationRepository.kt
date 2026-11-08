@@ -39,7 +39,8 @@ class ModerationRepository(
     suspend fun isBlocked(userId: String): Boolean = blockDao.isBlocked(userId)
 
     suspend fun block(userId: String, handle: String = ""): Outcome<Unit> {
-        val me = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        val me = session.ensureActor().getOrNull()?.userId
+            ?: return Outcome.Failure(AppError.Unauthorized())
         if (me == userId) {
             return Outcome.Failure(AppError.Validation("self_block", "Vous ne pouvez pas vous bloquer."))
         }
@@ -49,6 +50,10 @@ class ModerationRepository(
             BlockInsert.serializer(),
             BlockInsert(blockerId = me, blockedId = userId),
         )
+        if (SessionManager.isLocalId(me)) {
+            enqueue("block_create", "$me:$userId", payload)
+            return Outcome.Success(Unit)
+        }
         return when (val remote = api.insert("blocks", payload, upsert = true)) {
             is Outcome.Success -> Outcome.Success(Unit)
             is Outcome.Failure -> {
@@ -68,7 +73,8 @@ class ModerationRepository(
     }
 
     suspend fun report(draft: ReportDraft): Outcome<Unit> {
-        val me = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        val me = session.ensureActor().getOrNull()?.userId
+            ?: return Outcome.Failure(AppError.Unauthorized())
         if (draft.details.length > 1000) {
             return Outcome.Failure(AppError.Validation("details_too_long", "Le détail est trop long (1000 caractères)."))
         }
@@ -82,6 +88,10 @@ class ModerationRepository(
                 details = draft.details.trim(),
             ),
         )
+        if (SessionManager.isLocalId(me)) {
+            enqueue("report_create", "${draft.targetType}:${draft.targetId}:${draft.reason}", payload)
+            return Outcome.Success(Unit)
+        }
         return when (val remote = api.insert("reports", payload)) {
             is Outcome.Success -> Outcome.Success(Unit)
             is Outcome.Failure -> {

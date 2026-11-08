@@ -179,7 +179,10 @@ class ProfileViewModel(private val container: TomateContainer) : ViewModel() {
     fun signOut(onDone: () -> Unit) {
         viewModelScope.launch {
             container.session.signOut()
-            container.database.profileDao().deleteMe()
+            // Signing out must not leave another account's content behind on the device.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                container.database.clearAllTables()
+            }
             container.sessionStore.putHandle(null)
             onDone()
         }

@@ -67,6 +67,8 @@ fun OnboardingScreen(
             label = "Pseudo",
             supportingText = when {
                 state.checkingHandle -> "Vérification de la disponibilité…"
+                state.verificationDeferred ->
+                    "Hors connexion : le pseudo sera vérifié en ligne plus tard, sans bloquer la création."
                 state.handleAvailable == true -> "Ce pseudo est disponible."
                 state.handleAvailable == false -> "Ce pseudo est déjà pris."
                 else -> "3 à 20 caractères : lettres minuscules, chiffres ou _."
@@ -97,6 +99,14 @@ fun OnboardingScreen(
         VisibilityChooser(selected = state.visibility, onSelect = viewModel::onVisibilityChange)
 
         Spacer(Modifier.height(TomateSpacing.l))
+        if (state.offline) {
+            TomateInlineNotice(
+                text = "Hors connexion : votre compte sera créé sur cet appareil, immédiatement utilisable. " +
+                    "Il sera relié au réseau automatiquement dès qu'une connexion sera disponible.",
+                tone = NoticeTone.Info,
+            )
+            Spacer(Modifier.height(TomateSpacing.s))
+        }
         TomateInlineNotice(
             text = "Compte anonyme : sans code de récupération enregistré, la perte de l'appareil signifie la perte du compte. " +
                 "La récupération n'est pas encore opérationnelle dans cette version.",
@@ -129,14 +139,20 @@ fun OnboardingScreen(
 
         Spacer(Modifier.height(TomateSpacing.l))
         TomatePrimaryButton(
-            text = "Créer mon compte anonyme",
+            text = if (state.offline) "Créer mon compte hors ligne" else "Créer mon compte anonyme",
             onClick = { viewModel.submit(onCompleted) },
             modifier = Modifier.fillMaxWidth(),
             loading = state.submitting,
             enabled = state.handle.isNotBlank(),
         )
         Spacer(Modifier.height(TomateSpacing.m))
-        MetricPill(text = "Hors ligne : vos données locales restent lisibles")
+        MetricPill(
+            text = if (state.offline) {
+                "Compte local : aucune connexion requise"
+            } else {
+                "Vos données restent lisibles même hors ligne"
+            },
+        )
     }
 }
 

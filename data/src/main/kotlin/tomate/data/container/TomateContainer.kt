@@ -77,14 +77,36 @@ class TomateContainer(
     val moderation: ModerationRepository by lazy {
         ModerationRepository(api, database.blockDao(), database.outboxDao(), session)
     }
-    val sync: SyncEngine by lazy { SyncEngine(api, database.outboxDao()) }
+    val sync: SyncEngine by lazy {
+        SyncEngine(
+            api = api,
+            outboxDao = database.outboxDao(),
+            canSync = { !session.isLocalAccount() },
+        )
+    }
+
+    /** Migrates a local (offline) account to Supabase once the network is back. */
+    val account: tomate.data.account.AccountLinker by lazy {
+        tomate.data.account.AccountLinker(
+            api = api,
+            session = session,
+            profileDao = database.profileDao(),
+            postDao = database.postDao(),
+            commentDao = database.commentDao(),
+            messageDao = database.messageDao(),
+            conversationDao = database.conversationDao(),
+            communityDao = database.communityDao(),
+            outboxDao = database.outboxDao(),
+        )
+    }
 
     /**
      * First-launch bootstrap: ensure an anonymous session exists and refresh cached data.
      * Returns the session so the caller can decide what to show when the network is down.
      */
     suspend fun bootstrap(): Outcome<String> {
-        val sessionResult = session.ensureSession()
+        // ensureActor never fails because of connectivity: it falls back to a local identity.
+        val sessionResult = session.ensureActor()
         return when (sessionResult) {
             is Outcome.Success -> {
                 runCatching { profiles.pullMyProfile() }

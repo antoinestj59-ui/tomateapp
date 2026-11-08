@@ -33,8 +33,12 @@ class ProfileRepository(
 
     /** Pulls the remote profile for the current account, if any. */
     suspend fun pullMyProfile(): Outcome<Profile?> {
-        val userId = session.ensureSession().getOrNull()?.userId
+        val userId = session.ensureActor().getOrNull()?.userId
             ?: return Outcome.Failure(AppError.Unauthorized())
+        if (SessionManager.isLocalId(userId)) {
+            // Offline account: the local row is the truth until the linker migrates it.
+            return Outcome.Success(profileDao.me()?.toDomain())
+        }
         val response = api.select("profiles", listOf("id" to "eq.$userId", "select" to "*"))
         return when (response) {
             is Outcome.Failure -> response
@@ -58,6 +62,11 @@ class ProfileRepository(
             return Outcome.Success(false)
         }
         val myId = session.currentUserId
+        if (myId != null && SessionManager.isLocalId(myId)) {
+            // A local identity has no server token: answer from the local cache instead of
+            // surfacing a misleading "session expired" error during onboarding.
+            return Outcome.Success(!profileDao.handleTaken(normalised))
+        }
         val response = api.select(
             "profiles",
             listOf("handle" to "eq.$normalised", "select" to "id,handle"),
@@ -97,7 +106,7 @@ class ProfileRepository(
                 AppError.Validation("empty_display_name", "Le nom affiché est obligatoire."),
             )
         }
-        val userId = session.ensureSession().getOrNull()?.userId
+        val userId = session.ensureActor().getOrNull()?.userId
             ?: return Outcome.Failure(AppError.Unauthorized())
 
         val now = clock()
@@ -123,13 +132,17 @@ class ProfileRepository(
             visibility = visibility.name,
         )
         val body = SupabaseApi.json.encodeToString(ProfileDto.serializer(), dto)
-        val remote = api.insert("profiles", body, upsert = true, onConflict = "id")
-        return when (remote) {
+        if (SessionManager.isLocalId(userId)) {
+            // Offline account: the profile is saved locally and pushed by the linker.
+            return Outcome.Success(entity.toDomain())
+        }
+        return when (val remote = api.insert("profiles", body, upsert = true, onConflict = "id")) {
             is Outcome.Success -> {
                 profileDao.markSynced(userId)
                 Outcome.Success(entity.copy(pendingSync = false).toDomain())
             }
-            is Outcome.Failure -> Outcome.Failure(remote.error)
+            // Local-first: the profile exists on the device, the pending flag says it must be sent.
+            is Outcome.Failure -> Outcome.Success(entity.toDomain())
         }
     }
 

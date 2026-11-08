@@ -21,6 +21,8 @@ class SyncEngine(
     private val outboxDao: OutboxDao,
     private val backoff: Backoff = Backoff(),
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /** Gate: a local account has no server reach yet, queued work must stay untouched. */
+    private val canSync: suspend () -> Boolean = { true },
 ) {
     data class SyncReport(
         val attempted: Int,
@@ -31,6 +33,9 @@ class SyncEngine(
     )
 
     suspend fun drain(maxEntries: Int = 25): SyncReport {
+        if (!canSync()) {
+            return SyncReport(attempted = 0, succeeded = 0, rescheduled = 0, dropped = 0)
+        }
         val now = clock()
         val due = outboxDao.due(now, maxEntries)
         var succeeded = 0

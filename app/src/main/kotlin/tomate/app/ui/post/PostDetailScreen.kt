@@ -9,9 +9,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
@@ -67,7 +70,7 @@ fun PostDetailScreen(
             title = { Text("Publication") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Retour")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                 }
             },
             actions = {
@@ -155,14 +158,14 @@ fun PostDetailScreen(
                                     text = "@${comment.authorHandle.ifBlank { "anonyme" }}",
                                     style = MaterialTheme.typography.labelLarge,
                                 )
-                                Spacer(Modifier.padding(horizontal = TomateSpacing.xs))
+                                Spacer(Modifier.width(TomateSpacing.xs))
                                 Text(
                                     text = comment.createdAt.formatTimestamp(),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 if (comment.pendingSync) {
-                                    Spacer(Modifier.padding(horizontal = TomateSpacing.xs))
+                                    Spacer(Modifier.width(TomateSpacing.xs))
                                     Text(
                                         text = "en attente",
                                         style = MaterialTheme.typography.labelSmall,
@@ -187,7 +190,7 @@ fun PostDetailScreen(
                             maxLines = 4,
                         )
                         IconButton(onClick = viewModel::sendComment, enabled = !state.sending) {
-                            Icon(Icons.Filled.Send, contentDescription = "Envoyer le commentaire")
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Envoyer le commentaire")
                         }
                     }
                 }

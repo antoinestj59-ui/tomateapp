@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -100,12 +102,12 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     MetricPill(text = "${state.composerText.length}/2000")
-                    Spacer(Modifier.padding(horizontal = TomateSpacing.xs))
+                    Spacer(Modifier.width(TomateSpacing.xs))
                     IconButton(
                         onClick = viewModel::publish,
                         enabled = state.composerText.isNotBlank() && !state.posting,
                     ) {
-                        Icon(Icons.Filled.Send, contentDescription = "Publier")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Publier")
                     }
                 }
             }

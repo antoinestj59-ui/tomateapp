@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,7 +75,7 @@ fun ChatScreen(
             },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Retour")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                 }
             },
         )
@@ -122,7 +124,7 @@ fun ChatScreen(
                 maxLines = 5,
             )
             IconButton(onClick = viewModel::send, enabled = !state.sending && state.text.isNotBlank()) {
-                Icon(Icons.Filled.Send, contentDescription = "Envoyer")
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Envoyer")
             }
         }
     }

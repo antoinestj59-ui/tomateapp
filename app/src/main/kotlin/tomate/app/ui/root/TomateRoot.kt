@@ -54,6 +54,8 @@ fun TomateRoot() {
                         onRelayEnabledChange = { viewModel.setRelayEnabled(it) },
                         batterySaver = state.settings.batterySaver,
                         onBatterySaverChange = { viewModel.setBatterySaver(it) },
+                        notice = state.notice,
+                        onDismissNotice = viewModel::dismissNotice,
                     )
                 }
             }

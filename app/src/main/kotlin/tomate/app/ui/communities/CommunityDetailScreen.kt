@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,7 +62,7 @@ fun CommunityDetailScreen(
             title = { Text(state.community?.name ?: "Communauté") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Retour")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                 }
             },
         )
@@ -139,7 +141,7 @@ fun CommunityDetailScreen(
                                     onClick = viewModel::publish,
                                     enabled = state.composerText.isNotBlank() && !state.posting,
                                 ) {
-                                    Icon(Icons.Filled.Send, contentDescription = "Publier")
+                                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Publier")
                                 }
                             }
                         }

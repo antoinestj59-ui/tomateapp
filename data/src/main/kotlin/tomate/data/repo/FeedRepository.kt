@@ -52,6 +52,8 @@ class FeedRepository(
 
     /** Pulls the server feed (`feed` view: post + author + counters) into Room. */
     suspend fun refreshFeed(communityId: String? = null): Outcome<Int> {
+        // A local account has no server reach yet: the cached feed is the honest answer.
+        if (session.isLocalAccount()) return Outcome.Success(0)
         val query = buildList {
             add("select" to "*")
             add("order" to "created_at.desc")
@@ -74,6 +76,7 @@ class FeedRepository(
     }
 
     suspend fun refreshComments(postId: String): Outcome<Int> {
+        if (session.isLocalAccount()) return Outcome.Success(0)
         val query = listOf("post_id" to "eq.$postId", "select" to "*", "order" to "created_at.asc")
         return when (val response = api.select("post_comments", query)) {
             is Outcome.Failure -> response
@@ -101,7 +104,7 @@ class FeedRepository(
                 AppError.Validation("post_too_long", "Maximum $MAX_POST_LENGTH caractères."),
             )
         }
-        val userId = session.ensureSession().getOrNull()?.userId
+        val userId = session.ensureActor().getOrNull()?.userId
             ?: return Outcome.Failure(AppError.Unauthorized())
 
         val profile = profileDao.byId(userId)
@@ -133,6 +136,10 @@ class FeedRepository(
             visibility = visibility.name,
         )
         val payload = SupabaseApi.json.encodeToString(PostInsert.serializer(), wire)
+        if (SessionManager.isLocalId(userId)) {
+            enqueue("post_insert", postId, payload)
+            return Outcome.Success(entity.toDomain())
+        }
         return when (val remote = api.insert("posts", payload)) {
             is Outcome.Success -> {
                 postDao.markSynced(postId)
@@ -147,6 +154,10 @@ class FeedRepository(
 
     suspend fun deletePost(postId: String): Outcome<Unit> {
         postDao.markDeleted(postId)
+        if (session.isLocalAccount()) {
+            enqueue("post_delete", postId, """{"id":"$postId"}""")
+            return Outcome.Success(Unit)
+        }
         val remote = api.delete("posts", listOf("id" to "eq.$postId"))
         return when (remote) {
             is Outcome.Success -> Outcome.Success(Unit)
@@ -160,11 +171,24 @@ class FeedRepository(
 
     /** Adds or removes the "tomate" reaction. Optimistic locally, reconciled by the server. */
     suspend fun toggleReaction(postId: String, currentlyReacted: Boolean): Outcome<Boolean> {
-        val userId = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        val userId = session.ensureActor().getOrNull()?.userId
+            ?: return Outcome.Failure(AppError.Unauthorized())
         val post = postDao.byId(postId) ?: return Outcome.Failure(AppError.NotFound())
         val nextReacted = !currentlyReacted
         val nextCount = (post.reactionCount + if (nextReacted) 1 else -1).coerceAtLeast(0)
         postDao.updateReaction(postId, nextCount, nextReacted)
+        if (SessionManager.isLocalId(userId)) {
+            if (nextReacted) {
+                val payload = SupabaseApi.json.encodeToString(
+                    ReactionInsert.serializer(),
+                    ReactionInsert(postId = postId, userId = userId),
+                )
+                enqueue("reaction_add", "$postId:$userId", payload)
+            } else {
+                enqueue("reaction_remove", "$postId:$userId", """{"post_id":"$postId","user_id":"$userId"}""")
+            }
+            return Outcome.Success(nextReacted)
+        }
 
         return if (nextReacted) {
             val wire = ReactionInsert(postId = postId, userId = userId)
@@ -193,7 +217,8 @@ class FeedRepository(
         if (trimmed.isEmpty()) {
             return Outcome.Failure(AppError.Validation("empty_comment", "Le commentaire est vide."))
         }
-        val userId = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        val userId = session.ensureActor().getOrNull()?.userId
+            ?: return Outcome.Failure(AppError.Unauthorized())
         val profile = profileDao.byId(userId)
         val now = clock()
         val commentId = UUID.randomUUID().toString()
@@ -213,6 +238,10 @@ class FeedRepository(
             CommentInsert.serializer(),
             CommentInsert(commentId, postId, userId, entity.body, parentId),
         )
+        if (SessionManager.isLocalId(userId)) {
+            enqueue("comment_insert", commentId, payload)
+            return Outcome.Success(entity.toDomain())
+        }
         return when (val remote = api.insert("post_comments", payload)) {
             is Outcome.Success -> {
                 commentDao.markSynced(commentId)
