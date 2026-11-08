@@ -14,7 +14,7 @@ ligne ci-dessous ne doit être lue comme « testé » sans la colonne *Statut* c
 | 4 | Data | validation des pseudos (format + réservés + normalisation) | unitaire JVM | automatisé |
 | 5 | Data | backoff : bornes, plafond, arrêt après N tentatives, jitter | unitaire JVM | automatisé |
 | 6 | Data | code de récupération : format, entropie (50 codes distincts), normalisation | unitaire JVM | automatisé |
-| 7 | Net | relais : acceptation, livraison locale, TTL, hops, quota, opt-out, taille, version | unitaire JVM (11 tests) | automatisé |
+| 7 | Net | relais : acceptation, livraison locale, TTL, hops, quota, opt-out, taille, version | unitaire JVM (15 tests) | automatisé |
 | 8 | Net | codec d'enveloppes : aller-retour, frames tronquées, base64 invalide | unitaire JVM (4 tests) | automatisé |
 | 9 | Supabase | health, settings, signup anonyme réel | réel (réseau) | **exécuté** |
 | 10 | Supabase | RLS multi-comptes (7 assertions) | réel (réseau) | `tooling/rls_smoke_test.sh` — bloqué tant que les migrations ne sont pas appliquées |

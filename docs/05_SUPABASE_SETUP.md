@@ -14,14 +14,29 @@ ni dans l'APK, ni dans le dépôt, ni dans ce document.
 | Inscription anonyme | fonctionnelle | oui (`is_anonymous: true`, JWT 3600 s) |
 | Tables | **aucune** | oui — d'où `PGRST205` affiché par l'app avant migrations |
 
-L'application est conçue pour rester utilisable **avant** les migrations : au lieu de
-planter ou d'afficher des données fictives, elle affiche un état d'erreur explicite
-(`SchemaMissing`) qui renvoie ici.
+L'application est conçue pour rester utilisable **avant** les migrations et **sans
+connexion** : un compte peut être créé hors ligne (identité locale), toutes les écritures
+restent sur l'appareil, et le compte est relié à Supabase automatiquement dès qu'une
+connexion et les migrations sont disponibles. Aucune donnée simulée n'est affichée.
 
 ## 1. Appliquer les migrations (5 minutes)
 
+> ⚠️ **Erreur fréquente** : `syntax error at or near "supabase"` signifie qu'un **chemin de
+> fichier** a été collé dans le SQL Editor (`supabase/migrations/0003_storage.sql`) au lieu
+> de son **contenu**. Le SQL Editor n'exécute que du SQL : le chemin n'en est pas.
+
+Deux façons de procéder, au choix.
+
+### A. Le plus simple : un seul fichier
+
+Ouvrir [`supabase/ALL_IN_ONE.sql`](../supabase/ALL_IN_ONE.sql), cliquer sur **Raw** (ou
+« Copier le fichier brut »), **tout** sélectionner, puis **Run** une seule fois. Ce fichier
+contient les trois migrations dans le bon ordre, séparées par des lignes de commentaire.
+
+### B. Fichier par fichier
+
 Dans le tableau de bord Supabase : **SQL Editor → New query**, puis exécuter **dans cet
-ordre**, en collant l'intégralité de chaque fichier :
+ordre**, en collant l'intégralité du contenu de chaque fichier (jamais son chemin) :
 
 1. [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql)
    — tables, contraintes, index, déclencheurs, vue `feed`.
@@ -29,6 +44,9 @@ ordre**, en collant l'intégralité de chaque fichier :
    — activation de RLS + politiques complètes + fonctions d'appui.
 3. [`supabase/migrations/0003_storage.sql`](../supabase/migrations/0003_storage.sql)
    — bucket d'avatars et politiques de stockage.
+
+Dans l'éditeur GitHub, le bouton **Copier** en haut à droite du fichier copie le contenu
+exact ; c'est ce contenu qu'il faut coller.
 
 Chaque fichier est idempotent (`create table if not exists`, `drop policy if exists`) :
 les réexécuter ne casse rien.

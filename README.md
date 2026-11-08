@@ -3,8 +3,9 @@
 Réseau social Android **natif**, **offline-first**, en français, avec communication locale
 **Bluetooth Low Energy** et **Wi-Fi**, relais multi-appareils, et synchronisation Supabase.
 
-> État : **version 0.1.0, APK debug fonctionnel**. Ce qui n'est pas testé est déclaré
-> comme tel. Lire [`STATUS.md`](STATUS.md) avant toute démonstration.
+> État : **version 0.1.1, APK debug fonctionnel**. Le compte se crée **avec ou sans
+> connexion**. Ce qui n'est pas testé est déclaré comme tel : lire [`STATUS.md`](STATUS.md)
+> avant toute démonstration.
 
 ## Sommaire
 
@@ -21,6 +22,7 @@ Réseau social Android **natif**, **offline-first**, en français, avec communic
 | Domaine | État | Détail |
 |---|---|---|
 | Compte anonyme Supabase | ✅ | signup anonyme réel, JWT rafraîchi, session chiffrée via Keystore |
+| **Création de compte hors ligne** | ✅ | identité locale `local-…`, tout reste utilisable, liaison Supabase automatique au retour du réseau |
 | Profil | ✅ | pseudo validé, nom, bio, visibilité, édition, déconnexion |
 | Fil & publications | ✅ | composeur, fil local, suppression, réactions |
 | Commentaires | ✅ | ajout, suppression, compteurs |
@@ -73,12 +75,16 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 Le projet Supabase public est déjà renseigné : seules les **migrations** restent à
 appliquer (option A, SQL Editor). Guide détaillé : [`docs/05_SUPABASE_SETUP.md`](docs/05_SUPABASE_SETUP.md).
 
+Dans **SQL Editor → New query**, coller le **contenu** de
+[`supabase/ALL_IN_ONE.sql`](supabase/ALL_IN_ONE.sql) (bouton *Raw* / *Copier le fichier*),
+puis **Run** une seule fois. Ce fichier contient les trois migrations dans le bon ordre.
+
+> Ne collez jamais un **chemin** de fichier (`supabase/migrations/0003_storage.sql`) : le SQL
+> Editor n'exécute que du SQL et répondrait `syntax error at or near "supabase"`.
+
+Ensuite, vérifier les RLS avec deux comptes réels :
+
 ```bash
-# 1. Coller dans le SQL Editor, dans l'ordre :
-#    supabase/migrations/0001_init.sql
-#    supabase/migrations/0002_rls.sql
-#    supabase/migrations/0003_storage.sql
-# 2. Vérifier les RLS avec deux comptes réels :
 ./tooling/rls_smoke_test.sh
 ```
 
@@ -103,7 +109,7 @@ Détails et décisions : [`docs/02_ARCHITECTURE.md`](docs/02_ARCHITECTURE.md).
 | Suite | Où | Exécutable sans appareil |
 |---|---|---|
 | Relais (11 tests) + codec (4 tests) | `net/src/test` | oui |
-| Backoff, code de récupération, pseudos (11 tests) | `data/src/test` | oui |
+| Backoff, récupération, pseudos, compte hors ligne (15 tests) | `data/src/test` | oui |
 | Persistance Room (5 tests) | `data/src/androidTest` | non (appareil requis) |
 | RLS multi-comptes (7 assertions) | `tooling/rls_smoke_test.sh` | oui, après migrations |
 
@@ -131,7 +137,11 @@ Matrice complète et protocole multi-téléphones :
 3. **Relais non validé à trois appareils.** Le moteur de politique est couvert par des
    tests unitaires (TTL, hops, doublons, quota, opt-out).
 4. **Restauration de compte indisponible.** Elle exigerait une fonction serveur.
-5. **Suppression de compte serveur à implémenter** avant toute publication Play Store.
+5. **Pseudo choisi hors ligne :** il est vérifié à la liaison au réseau. S'il est déjà pris,
+   l'app le signale et vos données locales restent intactes ; il faut alors changer de pseudo.
+6. **La déconnexion efface les données locales** de l'appareil (comportement confirmé dans
+   l'interface) : c'est voulu pour qu'aucun contenu ne reste visible après un changement de compte.
+7. **Suppression de compte serveur à implémenter** avant toute publication Play Store.
 6. **Aucune publication n'a été effectuée** sur le Play Store, et aucune ne le sera sans
    autorisation explicite.
 
