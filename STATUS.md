@@ -1,109 +1,101 @@
-# STATUS — TOMATE 0.1.1
+# STATUS — TOMATE 0.1.2
 
-Dernière vérification : **8 novembre 2026**, sur une VM Linux x86_64 (JDK Temurin 21.0.13,
-Gradle 9.9.0, AGP 9.5.1, Android SDK 37).
+Dernière vérification : **8 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
+navigateur cloud Chromium pour la PWA.
 
-Ce fichier décrit **uniquement ce qui a été réellement exécuté**. Tout ce qui n'a pas pu
-l'être est listé comme non testé, jamais comme fonctionnel.
+Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est déclaré comme tel.
 
-## 1. Résultats de build et de tests (exécutés)
+## 1. Android — build et tests
 
 | Commande | Résultat |
 |---|---|
-| `./gradlew :app:assembleDebug` | **BUILD SUCCESSFUL** |
-| APK produit | `app/build/outputs/apk/debug/app-debug.apk` — **23 Mo** (`versionCode 2`, `0.1.1-debug`) |
-| `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, exit code 0 |
-| Tests unitaires exécutés | **net : 15** (11 relais + 4 codec), **data : 15** (dont 4 sur le compte hors ligne) |
+| `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
+| APK | `artifacts/tomate-0.1.2-debug.apk` — 23 Mo, `versionCode 3` |
+| `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
-| CI GitHub Actions | workflow versionné, **pas encore exécuté sur GitHub** |
 
-## 2. Création de compte hors ligne (nouveau)
+## 2. PWA — build et tests réels
 
-| Aspect | Comportement |
+| Élément | Valeur |
 |---|---|
-| Sans réseau | l'onboarding crée une **identité locale** `local-<uuid>`, persistée dans DataStore ; l'app s'ouvre normalement |
-| Deuxième lancement hors ligne | la même identité est restaurée (test unitaire) |
-| Écritures hors ligne | publications, commentaires, réactions, messages, communautés : écrits dans Room, marqués « en attente », file d'attente outbox |
-| Retour du réseau | `AccountLinker` crée le compte anonyme Supabase, réécrit l'id local vers l'id serveur (profil, publications, commentaires, messages, membres, propriétaire de communauté, payloads en attente), pousse le profil, puis vide la file |
-| Pseudo déjà pris à la liaison | échec signalé par une bannière ; **aucune donnée locale supprimée**, l'utilisateur change de pseudo |
-| Déconnexion | session, profil **et données locales** effacés (aucun contenu ne survit à un changement de compte) |
+| Code | `web/` (sans build), `sites.web.json` |
+| Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
+| Version | `0.1.2-web` |
+| Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
+| Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
+| Hors ligne simulé | publication mise en file, aucune fausse erreur |
+| Reconnexion | file rejouée, **2 publications sur le serveur**, file à 0 |
+| Service worker | actif, 12 fichiers précachés, manifeste `application/manifest+json` |
+| Météo | Open-Meteo réel (Lyon), cache daté |
+| Installation | **non testée** : `beforeinstallprompt` non déclenché en navigateur de test |
+| Rechargement sans réseau | **non conclu** : le proxy d'aperçu suspend au lieu d'échouer |
+| Bluetooth réel | **non testé** : aucun appareil à portée |
+| Messagerie bout en bout | **non testée** : pas de second compte |
 
-Preuves : `data/src/test/kotlin/tomate/data/OfflineIdentityTest.kt` (4 tests, Ktor MockEngine
-hors ligne/en ligne), et compilation complète de l'app.
+Détail complet : [`docs/07_PWA.md`](docs/07_PWA.md).
 
 ## 3. Correctifs de cette itération
 
-| Problème | Correction |
-|---|---|
-| Erreur SQL `42601 syntax error at or near "supabase"` | causée par un **chemin de fichier collé** dans le SQL Editor ; `supabase/ALL_IN_ONE.sql` fourni + instructions explicites dans `docs/05` |
-| Création de compte impossible sans réseau | identité locale + liaison automatique (ci-dessus) |
-| `isHandleAvailable` hors ligne affichait « session expirée » | vérification différée, message explicite, création non bloquée |
-| Vérification du pseudo à chaque frappe (rafale de requêtes) | debounce 450 ms |
-| Profil non enregistré si l'envoi échouait | l'écriture locale réussit toujours, le drapeau `pendingSync` indique l'envoi restant |
-| Avatars « spacer » de largeur nulle (padding sur `Spacer`) | `Modifier.width(...)` |
-| Icônes `ArrowBack` / `Send` non miroir en RTL | `Icons.AutoMirrored.Filled.*` |
-| Bannière globale absente (compte relié, pseudo pris) | bannière en haut de la navigation |
+| Bug constaté | Cause | Correction |
+|---|---|---|
+| « Se déconnecter » ne faisait rien de visible | la base était vidée mais l'écran d'onboarding ne revenait jamais | `needsOnboarding` dérivé aussi de l'absence de profil |
+| Faux « Cette action entre en conflit avec des données existantes » à la publication | inserts non idempotents : rejeu d'un contenu déjà présent → HTTP 409 | `resolution=merge-duplicates` sur les identifiants générés côté client (Android **et** PWA) |
+| Commentaire web bloqué sur « En attente » après envoi | l'état n'était pas remis à jour après le vidage de la file | `markSynced` étendu aux commentaires + rechargement depuis IndexedDB |
+| « Commu… » tronqué dans la barre du bas | libellé trop large pour 5 entrées | taille de police ajustée, libellé sur une ligne |
+| Erreur « réseau indisponible » affichée hors ligne | le message d'échec était traité comme une erreur | hors ligne = simple notice « en attente », pas de bannière d'erreur |
 
-## 4. Fonctionnalités — état réel
+## 4. Fonctionnalités annoncées — état
 
-### Terminées et compilées
+### Android (compilé, partiellement testé)
 
-Onboarding (y compris hors ligne), fil, composeur, réactions, commentaires, suppression,
-communautés (création, adhésion, publications réservées), messagerie local-first avec
-déduplication `client_id`, blocage et signalement, profil et réglages, session anonyme
-Supabase + refresh chiffré Keystore, proximité BLE (GATT serveur + client), Wi-Fi local
-(NSD + TCP), moteur de relais (TTL, hops, doublons, quota, opt-out).
+Onboarding hors ligne, fil, publications, réactions, commentaires, communautés, messagerie
+local-first, blocage/signalement, profil, session anonyme + refresh Keystore, BLE/Wi-Fi/relais
+(protocole compilé, **non exécuté sur radio**).
 
-### Partielles, signalées dans l'UI
+### PWA (testée en navigateur)
 
-| Fonctionnalité | Ce qui manque |
-|---|---|
-| Récupération de compte | code généré et stocké chiffré ; restauration impossible (pas de fonction serveur) |
-| Avatars | bucket + politiques SQL fournis ; pas d'UI d'upload |
-| Notifications | permission déclarée ; pas d'intégration FCM |
+Compte local/hors ligne, fil, publication, réaction, commentaire, messagerie texte, communautés,
+météo, file d'attente, page de permissions, thème, installation (manifeste + SW).
 
-### Absentes, annoncées comme absentes
+### Absent — déclaré absent
 
-Chiffrement de bout en bout, suppression de compte côté serveur, appels audio/vidéo.
+Chiffrement de bout en bout, récupération de compte, suppression de compte serveur, stories,
+événements, cartes hors ligne, appels, notifications push, mesh navigateur.
 
 ## 5. Ce qui n'a pas pu être testé ici
 
-| Test | Raison | Statut |
-|---|---|---|
-| RLS réelle (7 assertions, 2 comptes) | migrations à appliquer par l'utilisateur | script prêt : `tooling/rls_smoke_test.sh` |
-| Persistance Room sur appareil (5 tests) | aucun appareil, `/dev/kvm` inaccessible | compilé, non exécuté |
-| BLE / Wi-Fi / relais multi-téléphones | aucune radio | protocole fourni (`docs/06` §3) |
-| Liaison locale → Supabase sur un vrai projet | nécessite le réseau + migrations appliquées | logique couverte par tests unitaires, **pas de test d'intégration réel** |
-| CI sur GitHub | exécution distante | workflow fourni |
-| Captures d'écran | aucun émulateur possible | **non produites** |
+| Test | Raison |
+|---|---|
+| RLS réelle (2 comptes, accès croisé) | migrations à valider côté projet ; script prêt |
+| Tests instrumentés Room (5) | pas d'appareil / `/dev/kvm` |
+| BLE / Wi-Fi / relais multi-téléphones | pas de radio |
+| Installation PWA | `beforeinstallprompt` non émis dans le navigateur cloud |
+| Rechargement totalement hors ligne | proxy d'aperçu suspend la requête |
+| Messages web bout en bout | pas de second compte |
+| Captures d'écran | aucun émulateur, captures navigateur possibles seulement sur demande explicite |
 
-## 6. Décisions techniques notables
+## 6. Décisions notables
 
 | # | Décision | Raison |
 |---|---|---|
-| 1 | Kotlin intégré à AGP (pas de plugin `org.jetbrains.kotlin.android`) | incompatible avec AGP 9.5.1 — vérifié par échec de build |
-| 2 | Client HTTP Supabase minimal (Ktor) | auditabilité, testabilité, ADR-002 |
-| 3 | `compileSdk 37` | exigé par Compose 1.12.x |
-| 4 | Identité locale `local-…` plutôt qu'un écran d'erreur | promesse produit : compte créable hors ligne |
-| 5 | Réécriture de l'id local en une passe, puis envoi | reprise après interruption, aucune perte |
-| 6 | Relais en mémoire uniquement | « un relais ne garde rien » reste vrai |
-| 7 | `security_invoker` sur la vue `feed` | sinon contournement des RLS |
+| 1 | PWA sans framework ni build | déploiement direct, surface minimale, cache simple |
+| 2 | Écritures idempotentes par identifiant client | rejeu sûr, plus de faux conflits |
+| 3 | Compte local `local-…` aussi dans la PWA | même promesse produit que l'Android |
+| 4 | Permissions expliquées et testées sur action | « dire pourquoi » et ne rien simuler |
+| 5 | Aucun mesh simulé dans la PWA | un navigateur ne peut pas relayer en arrière-plan |
 
-## 7. Prochaines étapes (par priorité)
+## 7. Prochaines étapes
 
-| # | Étape | Effort |
-|---|---|---|
-| 1 | Appliquer `ALL_IN_ONE.sql` puis `./tooling/rls_smoke_test.sh` | 15 min (utilisateur) |
-| 2 | Tester la liaison hors ligne → en ligne sur un appareil réel | 30 min |
-| 3 | Test matériel BLE / Wi-Fi / relais (3 appareils) | 1 h |
-| 4 | Suppression de compte serveur (Edge Function) | 1–2 j |
-| 5 | Jalon E2EE complet (libsignal) | 2–3 semaines |
-| 6 | Chiffrement de la base locale (SQLCipher) | 3–5 j |
+1. Tester la PWA sur un vrai téléphone : installation, mode avion, reconnexion.
+2. Exécuter `tooling/rls_smoke_test.sh` avec deux comptes.
+3. Tester la messagerie web avec un second compte.
+4. Test matériel BLE/Wi-Fi/relais Android (3 appareils).
+5. Récupération de compte (fonction serveur) et suppression de compte.
+6. E2EE avec un protocole reconnu.
 
 ## 8. Honnêteté de livraison
 
-- Aucun bouton fictif : chaque action visible appelle un repository ou affiche une
-  indisponibilité explicite.
-- Aucune donnée simulée présentée comme réelle.
-- Aucune clé secrète dans le dépôt, l'APK ou la conversation.
-- Aucune publication Play Store effectuée.
+- Aucun bouton fictif ; chaque action appelle une vraie API ou explique son absence.
+- Aucune donnée météo inventée, aucune ancienneté masquée.
+- Aucune clé secrète dans le dépôt, l'APK ou la conversation (clé publishable uniquement).
+- Aucune publication en production, aucune publication Play Store.

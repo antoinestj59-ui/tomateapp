@@ -1,0 +1,25 @@
+{
+  "name": "TOMATE — réseau social hors ligne",
+  "short_name": "TOMATE",
+  "description": "Réseau social hybride : fonctionne hors ligne, se synchronise avec Supabase quand Internet revient.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fdf8f4",
+  "theme_color": "#e2542c",
+  "lang": "fr",
+  "dir": "ltr",
+  "categories": ["social", "communication"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Publier", "short_name": "Publier", "url": "/#/feed" },
+    { "name": "Messages", "short_name": "Messages", "url": "/#/messages" },
+    { "name": "Météo", "short_name": "Météo", "url": "/#/weather" }
+  ]
+}

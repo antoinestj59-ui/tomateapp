@@ -1,11 +1,14 @@
 # 🍅 TOMATE
 
-Réseau social Android **natif**, **offline-first**, en français, avec communication locale
-**Bluetooth Low Energy** et **Wi-Fi**, relais multi-appareils, et synchronisation Supabase.
+Réseau social **Android natif** et **PWA installable**, **offline-first**, en français, avec
+communication locale **Bluetooth Low Energy** et **Wi-Fi**, relais multi-appareils, et
+synchronisation Supabase.
 
-> État : **version 0.1.1, APK debug fonctionnel**. Le compte se crée **avec ou sans
-> connexion**. Ce qui n'est pas testé est déclaré comme tel : lire [`STATUS.md`](STATUS.md)
+> État : **version 0.1.2**, APK debug et PWA publiés en aperçu. Le compte se crée **avec ou
+> sans connexion**. Ce qui n'est pas testé est déclaré comme tel : lire [`STATUS.md`](STATUS.md)
 > avant toute démonstration.
+>
+> PWA : https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page
 
 ## Sommaire
 
@@ -23,6 +26,7 @@ Réseau social Android **natif**, **offline-first**, en français, avec communic
 |---|---|---|
 | Compte anonyme Supabase | ✅ | signup anonyme réel, JWT rafraîchi, session chiffrée via Keystore |
 | **Création de compte hors ligne** | ✅ | identité locale `local-…`, tout reste utilisable, liaison Supabase automatique au retour du réseau |
+| **PWA installable** | ✅ | `web/`, même backend, hors ligne (IndexedDB + service worker), permissions expliquées |
 | Profil | ✅ | pseudo validé, nom, bio, visibilité, édition, déconnexion |
 | Fil & publications | ✅ | composeur, fil local, suppression, réactions |
 | Commentaires | ✅ | ajout, suppression, compteurs |
@@ -69,6 +73,19 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```bash
 ./gradlew :core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest
 ```
+
+## Version web (PWA)
+
+```bash
+cd web && python3 -m http.server 3000 --bind 0.0.0.0
+```
+
+Même compte et mêmes données que l'Android : auth anonyme, fil, publications, réactions,
+commentaires, messagerie texte, communautés, météo Open-Meteo, file d'attente hors ligne,
+page de permissions réellement détectées. Le mesh BLE/Wi-Fi et le relais restent
+**Android uniquement** : aucun navigateur ne les permet, et la PWA l'explique.
+
+Détail, limites et preuves de test : [`docs/07_PWA.md`](docs/07_PWA.md).
 
 ## Configuration Supabase
 
@@ -126,6 +143,7 @@ Matrice complète et protocole multi-téléphones :
 | [`docs/04_SECURITE.md`](docs/04_SECURITE.md) | modèle de menace, RLS, E2EE, secrets |
 | [`docs/05_SUPABASE_SETUP.md`](docs/05_SUPABASE_SETUP.md) | migrations, SQL Editor, dépannage |
 | [`docs/06_TESTS_ET_LIVRAISON.md`](docs/06_TESTS_ET_LIVRAISON.md) | matrice de tests, multi-appareils, Play Store |
+| [`docs/07_PWA.md`](docs/07_PWA.md) | PWA : fonctions, limites navigateur, tests effectués |
 | [`STATUS.md`](STATUS.md) | état réel, vérifié, des fonctionnalités et des tests |
 
 ## Limites honnêtes
@@ -141,9 +159,11 @@ Matrice complète et protocole multi-téléphones :
    l'app le signale et vos données locales restent intactes ; il faut alors changer de pseudo.
 6. **La déconnexion efface les données locales** de l'appareil (comportement confirmé dans
    l'interface) : c'est voulu pour qu'aucun contenu ne reste visible après un changement de compte.
-7. **Suppression de compte serveur à implémenter** avant toute publication Play Store.
-6. **Aucune publication n'a été effectuée** sur le Play Store, et aucune ne le sera sans
-   autorisation explicite.
+7. **PWA : capabilities limitées par le navigateur.** Pas de BLE en arrière-plan, pas de
+   Wi-Fi Direct, pas de relais : ces fonctions restent Android. L'écran Réseau les liste.
+8. **Suppression de compte serveur à implémenter** avant toute publication Play Store.
+9. **Aucune publication Play Store n'a été effectuée**, et aucune ne le sera sans
+   autorisation explicite. La PWA n'est déployée qu'en **aperçu**, pas en production.
 
 ## Licence
 
