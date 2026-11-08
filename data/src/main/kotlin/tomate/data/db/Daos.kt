@@ -1,0 +1,248 @@
+package tomate.data.db
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface ProfileDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(profile: ProfileEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(profiles: List<ProfileEntity>)
+
+    @Query("SELECT * FROM profiles WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): ProfileEntity?
+
+    @Query("SELECT * FROM profiles WHERE isMe = 1 LIMIT 1")
+    fun observeMe(): Flow<ProfileEntity?>
+
+    @Query("SELECT * FROM profiles WHERE isMe = 1 LIMIT 1")
+    suspend fun me(): ProfileEntity?
+
+    @Query("SELECT * FROM profiles WHERE isMe = 0 AND (handle LIKE '%' || :query || '%' OR displayName LIKE '%' || :query || '%')")
+    fun search(query: String): Flow<List<ProfileEntity>>
+
+    @Query("UPDATE profiles SET pendingSync = 0 WHERE id = :id")
+    suspend fun markSynced(id: String)
+
+    @Query("DELETE FROM profiles WHERE id = :id AND isMe = 0")
+    suspend fun deleteCached(id: String)
+
+    @Query("DELETE FROM profiles WHERE isMe = 1")
+    suspend fun deleteMe()
+}
+
+@Dao
+interface PostDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(post: PostEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(posts: List<PostEntity>)
+
+    @Query("SELECT * FROM posts WHERE deleted = 0 AND (:communityId IS NULL OR communityId = :communityId) ORDER BY createdAt DESC LIMIT :limit OFFSET :offset")
+    fun observeFeed(communityId: String?, limit: Int, offset: Int): Flow<List<PostEntity>>
+
+    @Query("SELECT * FROM posts WHERE id = :id LIMIT 1")
+    fun observeById(id: String): Flow<PostEntity?>
+
+    @Query("SELECT * FROM posts WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): PostEntity?
+
+    @Query("SELECT * FROM posts WHERE authorId = :authorId AND deleted = 0 ORDER BY createdAt DESC")
+    fun observeByAuthor(authorId: String): Flow<List<PostEntity>>
+
+    @Query("UPDATE posts SET pendingSync = 0 WHERE id = :id")
+    suspend fun markSynced(id: String)
+
+    @Query("UPDATE posts SET deleted = 1 WHERE id = :id")
+    suspend fun markDeleted(id: String)
+
+    @Query("UPDATE posts SET reactionCount = :count, reactedByMe = :reacted WHERE id = :id")
+    suspend fun updateReaction(id: String, count: Int, reacted: Boolean)
+
+    @Query("UPDATE posts SET commentCount = :count WHERE id = :id")
+    suspend fun updateCommentCount(id: String, count: Int)
+
+    @Query("DELETE FROM posts WHERE pendingSync = 0")
+    suspend fun clearSynced()
+}
+
+@Dao
+interface CommentDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(comment: CommentEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(comments: List<CommentEntity>)
+
+    @Query("SELECT * FROM comments WHERE postId = :postId ORDER BY createdAt ASC")
+    fun observeForPost(postId: String): Flow<List<CommentEntity>>
+
+    @Query("UPDATE comments SET pendingSync = 0 WHERE id = :id")
+    suspend fun markSynced(id: String)
+
+    @Query("DELETE FROM comments WHERE postId = :postId AND pendingSync = 0")
+    suspend fun clearSyncedForPost(postId: String)
+}
+
+@Dao
+interface CommunityDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(community: CommunityEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(communities: List<CommunityEntity>)
+
+    @Query("SELECT * FROM communities ORDER BY memberCount DESC, name ASC")
+    fun observeAll(): Flow<List<CommunityEntity>>
+
+    @Query("SELECT * FROM communities WHERE id = :id LIMIT 1")
+    fun observeById(id: String): Flow<CommunityEntity?>
+
+    @Query("SELECT * FROM communities WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): CommunityEntity?
+
+    @Query("SELECT * FROM communities WHERE myMembership = 'Active'")
+    fun observeMine(): Flow<List<CommunityEntity>>
+
+    @Query("DELETE FROM communities")
+    suspend fun clear()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMember(member: CommunityMemberCacheEntity)
+
+    @Query("SELECT * FROM community_members_cache WHERE communityId = :communityId")
+    suspend fun members(communityId: String): List<CommunityMemberCacheEntity>
+}
+
+@Dao
+interface ConversationDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(conversation: ConversationEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMembers(members: List<ConversationMemberEntity>)
+
+    @Query("SELECT * FROM conversations ORDER BY lastMessageAt DESC")
+    fun observeAll(): Flow<List<ConversationEntity>>
+
+    @Query("SELECT * FROM conversations WHERE id = :id LIMIT 1")
+    fun observeById(id: String): Flow<ConversationEntity?>
+
+    @Query("SELECT * FROM conversations WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): ConversationEntity?
+
+    @Query("SELECT * FROM conversation_members WHERE conversationId = :conversationId")
+    suspend fun members(conversationId: String): List<ConversationMemberEntity>
+
+    @Query("UPDATE conversations SET lastMessagePreview = :preview, lastMessageAt = :at, pendingCount = :pending WHERE id = :id")
+    suspend fun updateLastMessage(id: String, preview: String, at: Long, pending: Int)
+
+    @Query("UPDATE conversations SET unreadCount = 0 WHERE id = :id")
+    suspend fun clearUnread(id: String)
+
+    @Query("SELECT COUNT(*) FROM conversations")
+    suspend fun count(): Int
+}
+
+@Dao
+interface MessageDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(message: MessageEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(message: MessageEntity): Long
+
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC")
+    fun observeForConversation(conversationId: String): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt DESC LIMIT 1")
+    suspend fun lastMessage(conversationId: String): MessageEntity?
+
+    @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): MessageEntity?
+
+    @Query("SELECT * FROM messages WHERE clientId = :clientId LIMIT 1")
+    suspend fun byClientId(clientId: String): MessageEntity?
+
+    @Query("UPDATE messages SET deliveryState = :state, transport = :transport, lastError = :error WHERE id = :id")
+    suspend fun updateDelivery(id: String, state: String, transport: String?, error: String?)
+
+    @Query("UPDATE messages SET attemptCount = attemptCount + 1, lastError = :error WHERE id = :id")
+    suspend fun recordAttempt(id: String, error: String?)
+
+    @Query("UPDATE messages SET deliveryState = 'Read' WHERE conversationId = :conversationId AND senderId != :me")
+    suspend fun markConversationRead(conversationId: String, me: String)
+
+    @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND deliveryState IN ('Pending','Failed')")
+    suspend fun pendingCount(conversationId: String): Int
+
+    @Query("SELECT COUNT(*) FROM messages WHERE deliveryState = 'Pending'")
+    fun observePendingCount(): Flow<Int>
+
+    @Query("SELECT * FROM messages WHERE deliveryState = 'Pending' ORDER BY createdAt ASC LIMIT :limit")
+    suspend fun pendingMessages(limit: Int): List<MessageEntity>
+}
+
+@Dao
+interface OutboxDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun enqueue(entry: OutboxEntity): Long
+
+    @Query("SELECT * FROM outbox WHERE nextAttemptAt <= :now ORDER BY createdAt ASC LIMIT :limit")
+    suspend fun due(now: Long, limit: Int): List<OutboxEntity>
+
+    @Query("SELECT COUNT(*) FROM outbox")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM outbox")
+    suspend fun count(): Int
+
+    @Query("DELETE FROM outbox WHERE id = :id")
+    suspend fun done(id: String)
+
+    @Query("UPDATE outbox SET attempts = attempts + 1, nextAttemptAt = :nextAttemptAt, lastError = :error WHERE id = :id")
+    suspend fun reschedule(id: String, nextAttemptAt: Long, error: String?)
+
+    @Query("SELECT * FROM outbox WHERE kind = :kind AND idempotencyKey = :key LIMIT 1")
+    suspend fun byKey(kind: String, key: String): OutboxEntity?
+}
+
+@Dao
+interface SyncStateDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(state: SyncStateEntity)
+
+    @Query("SELECT value FROM sync_state WHERE key = :key LIMIT 1")
+    suspend fun get(key: String): String?
+
+    @Query("SELECT * FROM sync_state")
+    fun observeAll(): Flow<List<SyncStateEntity>>
+}
+
+@Dao
+interface BlockDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun block(entry: BlockedUserEntity)
+
+    @Query("DELETE FROM blocked_users WHERE userId = :userId")
+    suspend fun unblock(userId: String)
+
+    @Query("SELECT * FROM blocked_users ORDER BY blockedAt DESC")
+    fun observeAll(): Flow<List<BlockedUserEntity>>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM blocked_users WHERE userId = :userId)")
+    suspend fun isBlocked(userId: String): Boolean
+}
+
+@Dao
+interface MaintenanceDao {
+    /** Local retention: delivered messages older than the window are pruned. */
+    @Query("DELETE FROM messages WHERE createdAt < :before AND deliveryState != 'Pending'")
+    suspend fun pruneOldMessages(before: Long)
+}
