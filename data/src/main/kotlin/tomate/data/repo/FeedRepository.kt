@@ -140,7 +140,7 @@ class FeedRepository(
             enqueue("post_insert", postId, payload)
             return Outcome.Success(entity.toDomain())
         }
-        return when (val remote = api.insert("posts", payload)) {
+        return when (val remote = api.insert("posts", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> {
                 postDao.markSynced(postId)
                 Outcome.Success(entity.copy(pendingSync = false).toDomain())
@@ -242,7 +242,7 @@ class FeedRepository(
             enqueue("comment_insert", commentId, payload)
             return Outcome.Success(entity.toDomain())
         }
-        return when (val remote = api.insert("post_comments", payload)) {
+        return when (val remote = api.insert("post_comments", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> {
                 commentDao.markSynced(commentId)
                 Outcome.Success(entity.copy(pendingSync = false).toDomain())

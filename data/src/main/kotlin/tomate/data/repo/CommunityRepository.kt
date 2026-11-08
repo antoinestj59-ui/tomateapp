@@ -125,7 +125,7 @@ class CommunityRepository(
             enqueue("community_create", id, payload)
             return Outcome.Success(entity.toDomain())
         }
-        return when (val remote = api.insert("communities", payload)) {
+        return when (val remote = api.insert("communities", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> {
                 val entity = dto.toEntity(role = CommunityRole.Owner, membership = MembershipStatus.Active)
                 communityDao.upsert(entity)
@@ -166,7 +166,7 @@ class CommunityRepository(
             enqueue("community_join", "$communityId:$userId", payload)
             return Outcome.Success(Unit)
         }
-        return when (val remote = api.insert("community_members", payload, upsert = true)) {
+        return when (val remote = api.insert("community_members", payload, upsert = true, onConflict = "community_id,user_id")) {
             is Outcome.Success -> {
                 communityDao.byId(communityId)?.let { existing ->
                     communityDao.upsert(

@@ -273,7 +273,13 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
             title = { Text("Se déconnecter ?") },
-            text = { Text("La session anonyme sera supprimée de cet appareil. Cette action est irréversible sans code de récupération.") },
+            text = {
+                Text(
+                    "La session, le profil et toutes les données locales de cet appareil seront " +
+                        "supprimés, y compris les opérations en attente. Cette action est irréversible " +
+                        "sans code de récupération.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmSignOut = false

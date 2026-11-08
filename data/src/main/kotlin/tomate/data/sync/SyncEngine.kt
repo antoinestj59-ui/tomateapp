@@ -80,9 +80,11 @@ class SyncEngine(
     }
 
     private suspend fun dispatch(entry: OutboxEntity): Outcome<Unit> = when (entry.kind) {
-        "post_insert" -> api.insert("posts", entry.payload).toUnit()
+        // Client-generated ids make every write idempotent: replaying an operation that already
+        // reached the server must not surface a false "already exists" conflict to the user.
+        "post_insert" -> api.insert("posts", entry.payload, upsert = true, onConflict = "id").toUnit()
         "post_delete" -> api.delete("posts", listOf("id" to "eq.${idFromPayload(entry.payload)}")).toUnit()
-        "comment_insert" -> api.insert("post_comments", entry.payload).toUnit()
+        "comment_insert" -> api.insert("post_comments", entry.payload, upsert = true, onConflict = "id").toUnit()
         "reaction_add" -> api.insert("post_reactions", entry.payload, upsert = true).toUnit()
         "reaction_remove" -> api.delete(
             "post_reactions",
@@ -92,11 +94,11 @@ class SyncEngine(
             ),
         ).toUnit()
         "profile_upsert" -> api.insert("profiles", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "community_create" -> api.insert("communities", entry.payload).toUnit()
+        "community_create" -> api.insert("communities", entry.payload, upsert = true, onConflict = "id").toUnit()
         "community_join" -> api.insert("community_members", entry.payload, upsert = true).toUnit()
-        "conversation_create" -> api.insert("conversations", entry.payload).toUnit()
-        "message_send" -> api.insert("messages", entry.payload).toUnit()
-        "report_create" -> api.insert("reports", entry.payload).toUnit()
+        "conversation_create" -> api.insert("conversations", entry.payload, upsert = true, onConflict = "id").toUnit()
+        "message_send" -> api.insert("messages", entry.payload, upsert = true, onConflict = "id").toUnit()
+        "report_create" -> api.insert("reports", entry.payload, upsert = true, onConflict = "id").toUnit()
         "block_create" -> api.insert("blocks", entry.payload, upsert = true).toUnit()
         else -> Outcome.Failure(
             AppError.Validation(

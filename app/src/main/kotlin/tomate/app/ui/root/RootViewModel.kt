@@ -65,7 +65,9 @@ class RootViewModel(private val container: TomateContainer) : ViewModel() {
     ) { isBooting, needsOnboarding, currentError, data, currentNotice ->
         UiState(
             booting = isBooting,
-            needsOnboarding = needsOnboarding,
+            // No profile means no account: this is what brings the user back to onboarding
+            // after a sign-out, instead of leaving them on an empty profile screen.
+            needsOnboarding = needsOnboarding || data.profile == null,
             error = currentError,
             profile = data.profile,
             pendingOperations = data.pending,

@@ -92,7 +92,7 @@ class ModerationRepository(
             enqueue("report_create", "${draft.targetType}:${draft.targetId}:${draft.reason}", payload)
             return Outcome.Success(Unit)
         }
-        return when (val remote = api.insert("reports", payload)) {
+        return when (val remote = api.insert("reports", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> Outcome.Success(Unit)
             is Outcome.Failure -> {
                 enqueue("report_create", "${draft.targetType}:${draft.targetId}:${draft.reason}", payload)

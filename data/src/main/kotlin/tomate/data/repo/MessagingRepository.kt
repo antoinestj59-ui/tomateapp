@@ -144,7 +144,7 @@ class MessagingRepository(
             enqueue("conversation_create", id, payload)
             return Outcome.Success(entity.toDomain())
         }
-        return when (val remote = api.insert("conversations", payload)) {
+        return when (val remote = api.insert("conversations", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> Outcome.Success(entity.toDomain())
             is Outcome.Failure -> {
                 enqueue("conversation_create", id, payload)
@@ -210,7 +210,7 @@ class MessagingRepository(
             updatePendingCount(conversationId)
             return Outcome.Success(entity.toDomain())
         }
-        return when (val remote = api.insert("messages", payload)) {
+        return when (val remote = api.insert("messages", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> {
                 messageDao.updateDelivery(messageId, MessageDeliveryState.Delivered.name, TransportKind.Internet.name, null)
                 updatePendingCount(conversationId)
