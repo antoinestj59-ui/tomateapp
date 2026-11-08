@@ -166,7 +166,7 @@ class CommunityRepository(
             enqueue("community_join", "$communityId:$userId", payload)
             return Outcome.Success(Unit)
         }
-        return when (val remote = api.insert("community_members", payload, upsert = true, onConflict = "community_id,user_id")) {
+        return when (val remote = api.insert("community_members", payload, ignoreDuplicates = true, onConflict = "community_id,user_id")) {
             is Outcome.Success -> {
                 communityDao.byId(communityId)?.let { existing ->
                     communityDao.upsert(

@@ -16,6 +16,7 @@ import tomate.data.backend.dto.ConversationDto
 import tomate.data.backend.dto.ConversationMemberDto
 import tomate.data.backend.dto.MessageDto
 import tomate.data.backend.dto.MessageInsert
+import tomate.data.backend.dto.ProfileDto
 import tomate.data.db.ConversationDao
 import tomate.data.db.ConversationEntity
 import tomate.data.db.ConversationMemberEntity
@@ -136,22 +137,72 @@ class MessagingRepository(
             } + ConversationMemberEntity(conversationId = id, memberId = me, displayName = "moi"),
         )
 
+        val peers = memberHandles
+            .map { it.trim().removePrefix("@") }
+            .filter { it.isNotBlank() }
+            .distinct()
         val payload = SupabaseApi.json.encodeToString(
             ConversationDto.serializer(),
-            ConversationDto(id = id, title = resolvedTitle, isGroup = isGroup),
+            ConversationDto(id = id, title = resolvedTitle, isGroup = isGroup, createdBy = me),
         )
+
+        // A local account cannot resolve handles on the server: keep the conversation local and
+        // queue the resolution so members are added when the account is linked.
         if (SessionManager.isLocalId(me)) {
             enqueue("conversation_create", id, payload)
+            enqueue("conversation_member_add", id, memberPayload(id, me))
+            peers.forEach { enqueue("conversation_member_add_handle", id, handlePayload(id, it)) }
             return Outcome.Success(entity.toDomain())
         }
-        return when (val remote = api.insert("conversations", payload, upsert = true, onConflict = "id")) {
-            is Outcome.Success -> Outcome.Success(entity.toDomain())
+
+        val resolved = resolveHandles(peers)
+        return when (val remote = api.insert("conversations", payload, representation = false)) {
+            is Outcome.Success -> {
+                // Membership must be pushed explicitly: without it neither peer can read the
+                // conversation, and the sender's own messages would be refused by RLS.
+                api.insert("conversation_members", memberPayload(id, me), ignoreDuplicates = true, onConflict = "conversation_id,user_id", representation = false)
+                resolved.values.forEach { peerId ->
+                    api.insert(
+                        "conversation_members",
+                        memberPayload(id, peerId),
+                        ignoreDuplicates = true,
+                        onConflict = "conversation_id,user_id",
+                        representation = false,
+                    )
+                }
+                Outcome.Success(entity.toDomain())
+            }
             is Outcome.Failure -> {
                 enqueue("conversation_create", id, payload)
+                enqueue("conversation_member_add", id, memberPayload(id, me))
+                peers.forEach { peer ->
+                    val peerId = resolved[peer]
+                    if (peerId != null) enqueue("conversation_member_add", id, memberPayload(id, peerId))
+                    else enqueue("conversation_member_add_handle", id, handlePayload(id, peer))
+                }
                 Outcome.Failure(remote.error)
             }
         }
     }
+
+    /** Resolves handles to profile ids; unknown or unreachable handles are simply absent. */
+    private suspend fun resolveHandles(handles: List<String>): Map<String, String> {
+        if (handles.isEmpty()) return emptyMap()
+        val filter = "in.(" + handles.joinToString(",") + ")"
+        return when (val response = api.select("profiles", listOf("select" to "id,handle", "handle" to filter))) {
+            is Outcome.Failure -> emptyMap()
+            is Outcome.Success -> runCatching {
+                SupabaseApi.json.decodeFromString(ListSerializer(ProfileDto.serializer()), response.value)
+                    .associate { it.handle to it.id }
+            }.getOrDefault(emptyMap())
+        }
+    }
+
+    private fun memberPayload(conversationId: String, userId: String): String =
+        """{"conversation_id":"$conversationId","user_id":"$userId"}"""
+
+    private fun handlePayload(conversationId: String, handle: String): String =
+        """{"conversation_id":"$conversationId","handle":"$handle"}"""
 
     /** Local-first send. Never loses the message: on failure it stays pending in the outbox. */
     suspend fun send(

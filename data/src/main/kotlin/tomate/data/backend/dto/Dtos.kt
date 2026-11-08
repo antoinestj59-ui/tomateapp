@@ -113,6 +113,8 @@ data class ConversationDto(
     val id: String,
     val title: String = "",
     @SerialName("is_group") val isGroup: Boolean = false,
+    /** Required by the server (`created_by` is NOT NULL) and by the insert RLS policy. */
+    @SerialName("created_by") val createdBy: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("last_message_at") val lastMessageAt: String? = null,
 )

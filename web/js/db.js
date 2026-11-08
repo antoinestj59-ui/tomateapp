@@ -41,6 +41,7 @@ export const removeItem = (store, key) => run(store, 'readwrite', (s) => s.delet
 export const getAll = (store) => run(store, 'readonly', (s) => s.getAll());
 export const addItem = (store, value) => run(store, 'readwrite', (s) => s.add(value));
 export const countItems = (store) => run(store, 'readonly', (s) => s.count());
+export const getAllKeys = (store) => run(store, 'readonly', (s) => s.getAllKeys());
 
 export async function clearStore(store) {
   await run(store, 'readwrite', (s) => s.clear());

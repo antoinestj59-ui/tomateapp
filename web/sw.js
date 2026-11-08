@@ -1,5 +1,5 @@
 // Service worker TOMATE : la coquille de l'app reste utilisable hors ligne.
-const CACHE = 'tomate-shell-v4';
+const CACHE = 'tomate-shell-v15';
 const SHELL = [
   '/',
   '/index.html',
@@ -16,7 +16,13 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      // `cache: reload` bypasses the HTTP cache: a version bump must never re-precache stale JS.
+      .then((cache) => cache.addAll(SHELL.map((path) => new Request(path, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -49,6 +55,23 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(async () => (await caches.match('/index.html')) ?? (await caches.match('/'))),
+    );
+    return;
+  }
+
+  // Code and stylesheets are network-first: a deploy must never serve mixed JS versions.
+  // Offline still works through the cached copy.
+  if (['script', 'style', 'worker'].includes(request.destination)) {
+    event.respondWith(
+      fetch(request, { cache: 'no-cache' })
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(async () => (await caches.match(request)) ?? Response.error()),
     );
     return;
   }

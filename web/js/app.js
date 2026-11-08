@@ -388,6 +388,7 @@ function postItem(post) {
         <strong>${esc(post.author_display_name || post.author_handle || 'Anonyme')}</strong>
         <span class="post-meta">@${esc(post.author_handle ?? '')} · ${fmtDate(post.created_at)}</span>
         ${post.pending ? '<span class="pending-label">En attente d\'envoi</span>' : ''}
+        ${post.failed ? '<span class="pending-label" style="color:var(--danger)">Non envoyé</span>' : ''}
       </div>
       <div class="post-body" data-body-post="${esc(post.id)}"></div>
       <div class="post-actions">
@@ -516,6 +517,7 @@ function commentItem(comment) {
         <strong style="font-size:14px">${esc(comment.author_display_name || comment.author_handle || 'Anonyme')}</strong>
         <span class="post-meta">· ${fmtDate(comment.created_at)}</span>
         ${comment.pending ? '<span class="pending-label">En attente</span>' : ''}
+        ${comment.failed ? '<span class="pending-label" style="color:var(--danger)">Non envoyé</span>' : ''}
       </div>
       <div class="post-body" style="margin:4px 0 0;font-size:14.5px" data-body-comment="${esc(comment.id)}"></div>
     </div>
@@ -615,7 +617,7 @@ function messageItem(message) {
   const mine = message.sender_id === S.profile?.id;
   return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:16px">
     <div style="white-space:pre-wrap">${esc(message.body)}</div>
-    <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${message.pending ? " · en attente" : ''}</div>
+    <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
   </div>`;
 }
 
@@ -651,8 +653,9 @@ async function loadMessages(conversationId) {
     const rows = await rest('messages', {
       query: `select=*&conversation_id=eq.${conversationId}&order=created_at.asc&limit=200`,
     });
-    const pending = S.messages.filter((m) => m.pending);
-    S.messages = [...rows, ...pending.filter((m) => !rows.some((r) => r.id === m.id))];
+    // Keep local-only messages, including refused ones: the user's text must not vanish silently.
+    const local = S.messages.filter((m) => m.pending || m.failed);
+    S.messages = [...rows, ...local.filter((m) => !rows.some((r) => r.id === m.id))];
     await cacheSet(key, S.messages);
   } catch {
     // Cached messages stay readable.
@@ -673,7 +676,15 @@ async function sendMessage(conversationId, body) {
   };
   S.messages = [...S.messages, message];
   await cacheSet(`messages:${conversationId}`, S.messages);
-  await enqueue('message_send', message);
+  // Only server columns go on the wire: local state (`pending`) is not a database column.
+  await enqueue('message_send', {
+    id: message.id,
+    client_id: message.client_id,
+    conversation_id: conversationId,
+    sender_id: message.sender_id,
+    body: text,
+    encrypted: false,
+  });
   render();
   await syncNow();
 }
@@ -1213,7 +1224,8 @@ async function syncNow({ silent = false } = {}) {
   } finally {
     S.syncBusy = false;
     await refreshCounts();
-    if (['feed', 'network', 'profile', 'settings'].includes(S.route)) render();
+    // Every route may show pending/failed badges: always repaint after a flush.
+    render();
   }
 }
 

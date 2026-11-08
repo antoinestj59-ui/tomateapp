@@ -116,13 +116,22 @@ class SupabaseApi(
         body: String,
         upsert: Boolean = false,
         onConflict: String? = null,
+        representation: Boolean = true,
+        ignoreDuplicates: Boolean = false,
     ): Outcome<String> = authorized { token ->
         val response = http.post(endpoint("/rest/v1/$table")) {
             header("apikey", apiKey)
             header("Authorization", "Bearer $token")
             header("Prefer", buildString {
-                append("return=representation")
-                if (upsert) append(",resolution=merge-duplicates")
+                // `return=minimal` avoids PostgREST re-reading the row, which would apply the
+                // SELECT policy before the creator is a conversation member (403).
+                append(if (representation) "return=representation" else "return=minimal")
+                // Membership tables have no UPDATE policy: a merge would be turned into an
+                // UPDATE by PostgREST and refused. Ignoring the duplicate is the correct intent.
+                when {
+                    ignoreDuplicates -> append(",resolution=ignore-duplicates")
+                    upsert -> append(",resolution=merge-duplicates")
+                }
             })
             if (onConflict != null) parameter("on_conflict", onConflict)
             contentType(ContentType.Application.Json)

@@ -1,5 +1,5 @@
 // File d'attente hors ligne de la PWA : chaque opération est rejouable et idempotente.
-import { addItem, cacheGet, cacheSet, countItems, getAll, removeItem } from './db.js';
+import { addItem, cacheGet, cacheSet, countItems, getAll, getAllKeys, removeItem } from './db.js';
 import { HttpError, ensureRemoteSession, rest } from './api.js';
 
 export const enqueue = (kind, payload) => addItem('outbox', { kind, payload, createdAt: Date.now() });
@@ -14,16 +14,36 @@ const ENDPOINTS = {
   post_insert: (p) => ['posts', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
   post_delete: (p) => ['posts', { method: 'DELETE', query: `id=eq.${p.id}` }],
   comment_insert: (p) => ['post_comments', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
-  reaction_add: (p) => ['post_reactions', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'post_id,user_id,kind' }],
+  reaction_add: (p) => ['post_reactions', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'post_id,user_id,kind' }],
   reaction_remove: (p) => ['post_reactions', { method: 'DELETE', query: `post_id=eq.${p.post_id}&user_id=eq.${p.user_id}&kind=eq.${p.kind ?? 'tomate'}` }],
   profile_upsert: (p) => ['profiles', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
   community_create: (p) => ['communities', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
-  community_join: (p) => ['community_members', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'community_id,user_id' }],
-  conversation_create: (p) => ['conversations', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
-  conversation_member_add: (p) => ['conversation_members', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'conversation_id,user_id' }],
+  community_join: (p) => ['community_members', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'community_id,user_id' }],
+  // return=minimal: PostgREST would otherwise re-read the new row and apply the SELECT policy
+  // before the creator has been added as a member (403).
+  conversation_create: (p) => ['conversations', { method: 'POST', body: p, prefer: 'return=minimal' }],
+  conversation_member_add: (p) => ['conversation_members', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'conversation_id,user_id' }],
   message_send: (p) => ['messages', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
   report_create: (p) => ['reports', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
 };
+
+async function markFailed(kind, payload) {
+  // A permanently refused operation must not look pending forever.
+  if (kind === 'post_insert') {
+    const feed = (await cacheGet('feed')) ?? [];
+    await cacheSet('feed', feed.map((p) => (p.id === payload.id ? { ...p, pending: false, failed: true } : p)));
+  }
+  if (kind === 'comment_insert') {
+    const key = `comments:${payload.post_id}`;
+    const comments = (await cacheGet(key)) ?? [];
+    await cacheSet(key, comments.map((c) => (c.id === payload.id ? { ...c, pending: false, failed: true } : c)));
+  }
+  if (kind === 'message_send') {
+    const key = `messages:${payload.conversation_id}`;
+    const messages = (await cacheGet(key)) ?? [];
+    await cacheSet(key, messages.map((m) => (m.id === payload.id ? { ...m, pending: false, failed: true } : m)));
+  }
+}
 
 async function markSynced(kind, payload) {
   if (kind === 'post_insert') {
@@ -39,6 +59,29 @@ async function markSynced(kind, payload) {
     const key = `messages:${payload.conversation_id}`;
     const messages = (await cacheGet(key)) ?? [];
     await cacheSet(key, messages.map((m) => (m.id === payload.id ? { ...m, pending: false } : m)));
+  }
+}
+
+/**
+ * Cached rows can be left "pending" by an app version that dropped an operation without a
+ * badge. Anything pending that has no matching outbox row is reported as not sent.
+ */
+async function reconcilePending() {
+  const ops = await getAll('outbox');
+  const queued = new Set(ops.map((op) => String(op.payload?.id)));
+  const keys = (await getAllKeys('cache')).filter(
+    (key) => key === 'feed' || String(key).startsWith('messages:') || String(key).startsWith('comments:'),
+  );
+  for (const key of keys) {
+    const list = await cacheGet(key);
+    if (!Array.isArray(list)) continue;
+    let changed = false;
+    const next = list.map((item) => {
+      if (!item?.pending || queued.has(String(item.id))) return item;
+      changed = true;
+      return { ...item, pending: false, failed: true };
+    });
+    if (changed) await cacheSet(key, next);
   }
 }
 
@@ -78,6 +121,7 @@ export async function flushQueue() {
       }
       if (error instanceof HttpError && (error.status === 400 || error.status === 422 || error.status === 403)) {
         lastError = `Opération refusée par le serveur (${error.status}) : ${String(error.body).slice(0, 160)}`;
+        await markFailed(op.kind, op.payload);
         await removeItem('outbox', op.id);
         continue;
       }
@@ -85,5 +129,6 @@ export async function flushQueue() {
       break;
     }
   }
+  await reconcilePending();
   return { flushed, remaining: await pendingCount(), lastError };
 }

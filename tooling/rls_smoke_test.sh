@@ -71,6 +71,27 @@ rest() {
     fi
 }
 
+rest_min() {
+    # rest_min <token> <method> <path> [body] — pas de relecture de la ligne (return=minimal),
+    # comme les clients Android et web pour conversations / membres.
+    local token="$1" method="$2" path="$3" body="${4:-}"
+    if [ -n "$body" ]; then
+        curl -sS -o /tmp/tomate_rls_body -w '%{http_code}' -X "$method" \
+            "$SUPABASE_URL/rest/v1/$path" \
+            -H "apikey: $PUBLISHABLE_KEY" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "$body"
+    else
+        curl -sS -o /tmp/tomate_rls_body -w '%{http_code}' -X "$method" \
+            "$SUPABASE_URL/rest/v1/$path" \
+            -H "apikey: $PUBLISHABLE_KEY" \
+            -H "Authorization: Bearer $token" \
+            -H "Prefer: return=minimal"
+    fi
+}
+
 body_rows() { jq 'if type == "array" then length else 0 end' /tmp/tomate_rls_body 2>/dev/null || echo 0; }
 
 echo "== Création de deux comptes anonymes réels =="
@@ -92,9 +113,11 @@ fi
 rest "$TOKEN_B" POST profiles "{\"id\":\"$USER_B\",\"handle\":\"$HANDLE_B\",\"display_name\":\"Compte B\",\"visibility\":\"Public\"}" >/dev/null
 
 echo "== Assertions RLS =="
-check "A relit son propre profil" "1" "$(rest "$TOKEN_A" GET "profiles?id=eq.$USER_A"; body_rows)"
+rest "$TOKEN_A" GET "profiles?id=eq.$USER_A" >/dev/null
+check "A relit son propre profil" "1" "$(body_rows)"
 
-check "B lit le profil public de A" "1" "$(rest "$TOKEN_B" GET "profiles?id=eq.$USER_A"; body_rows)"
+rest "$TOKEN_B" GET "profiles?id=eq.$USER_A" >/dev/null
+check "B lit le profil public de A" "1" "$(body_rows)"
 
 status=$(rest "$TOKEN_B" PATCH "profiles?id=eq.$USER_A" '{"bio":"piraté"}')
 check "B ne peut pas modifier le profil de A (0 ligne)" "0" "$(body_rows)"
@@ -103,22 +126,25 @@ status=$(rest "$TOKEN_B" POST posts "{\"author_id\":\"$USER_A\",\"body\":\"usurp
 check "B ne peut pas publier sous l'identité de A (403)" "403" "$status"
 
 rest "$TOKEN_A" POST posts "{\"author_id\":\"$USER_A\",\"body\":\"secret de A\",\"visibility\":\"Private\"}" >/dev/null
-check "B ne lit pas une publication privée de A (0 ligne)" "0" \
-    "$(rest "$TOKEN_B" GET "posts?author_id=eq.$USER_A&visibility=eq.Private"; body_rows)"
+rest "$TOKEN_B" GET "posts?author_id=eq.$USER_A&visibility=eq.Private" >/dev/null
+check "B ne lit pas une publication privée de A (0 ligne)" "0" "$(body_rows)"
 
 rest "$TOKEN_A" POST blocks "{\"blocker_id\":\"$USER_A\",\"blocked_id\":\"$USER_B\"}" >/dev/null
-check "Après blocage, B ne lit plus le profil de A (0 ligne)" "0" \
-    "$(rest "$TOKEN_B" GET "profiles?id=eq.$USER_A"; body_rows)"
+rest "$TOKEN_B" GET "profiles?id=eq.$USER_A" >/dev/null
+check "Après blocage, B ne lit plus le profil de A (0 ligne)" "0" "$(body_rows)"
 
-conv=$(rest "$TOKEN_A" POST conversations "{\"created_by\":\"$USER_A\",\"is_group\":false}")
-CONV_ID=$(jq -r '.[0].id // empty' /tmp/tomate_rls_body)
-if [ -n "$CONV_ID" ]; then
-    rest "$TOKEN_A" POST messages "{\"client_id\":\"$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)\",\"conversation_id\":\"$CONV_ID\",\"sender_id\":\"$USER_A\",\"body\":\"message privé\"}" >/dev/null
-    check "B ne lit pas les messages de la conversation de A (0 ligne)" "0" \
-        "$(rest "$TOKEN_B" GET "messages?conversation_id=eq.$CONV_ID"; body_rows)"
-else
-    check "Conversation créée pour le test de messagerie" "oui" "non"
-fi
+CONV_ID=$(cat /proc/sys/kernel/random/uuid)
+status=$(rest_min "$TOKEN_A" POST conversations "{\"id\":\"$CONV_ID\",\"created_by\":\"$USER_A\",\"is_group\":false}")
+check "A crée une conversation (201)" "201" "$status"
+rest_min "$TOKEN_A" POST conversation_members "{\"conversation_id\":\"$CONV_ID\",\"user_id\":\"$USER_A\"}" >/dev/null
+status=$(rest_min "$TOKEN_A" POST messages "{\"id\":\"$(cat /proc/sys/kernel/random/uuid)\",\"client_id\":\"$(cat /proc/sys/kernel/random/uuid)\",\"conversation_id\":\"$CONV_ID\",\"sender_id\":\"$USER_A\",\"body\":\"message privé\"}")
+check "A envoie un message (201)" "201" "$status"
+
+rest "$TOKEN_B" GET "messages?conversation_id=eq.$CONV_ID" >/dev/null
+check "B ne lit pas les messages de A (0 ligne)" "0" "$(body_rows)"
+
+rest "$TOKEN_B" GET "conversations?id=eq.$CONV_ID" >/dev/null
+check "B ne lit pas la conversation de A (0 ligne)" "0" "$(body_rows)"
 
 echo
 echo "== Rapport =="

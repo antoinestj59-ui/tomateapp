@@ -8,7 +8,7 @@ Client web de TOMATE : installable, hors ligne après le premier chargement, bra
 | Code | `web/` (HTML/CSS/JS sans build, modules ES) |
 | Déploiement | `sites.web.json` + `tooling/web-worker.js` (assets statiques) |
 | Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
-| Version | `0.1.2-web` |
+| Version | `0.1.3-web` |
 
 ## 1. Ce que la PWA fait réellement
 
@@ -18,7 +18,8 @@ Client web de TOMATE : installable, hors ligne après le premier chargement, bra
 - **Fil** : lecture de la vue `feed`, publication, réaction « tomate », commentaires, suppression
   de ses propres publications.
 - **Messagerie** : liste des conversations, création par pseudo, envoi de messages texte avec
-  `client_id` (déduplication), états « en attente » / envoyé.
+  `client_id` (déduplication), états « en attente » / envoyé / **non envoyé** quand le serveur
+  refuse définitivement une opération.
 - **Communautés** : liste, création, adhésion.
 - **Météo** : Open-Meteo réel (actuel, horaire, 5 jours, UV, lever/coucher), recherche de ville,
   géolocalisation sur action explicite, **cache daté** consultable hors ligne.
@@ -64,7 +65,13 @@ web/
 
 Choix assumés : pas de framework ni d'étape de build (moins de surface, déploiement direct des
 fichiers), contenu utilisateur inséré via `textContent` (pas d'injection HTML), écritures
-idempotentes (`resolution=merge-duplicates` sur des identifiants générés côté client).
+idempotentes sur des identifiants générés côté client. `merge-duplicates` n'est utilisé que sur
+les tables qui ont une politique UPDATE ; ailleurs c'est `ignore-duplicates`, et `conversations`
+reçoit un insert simple (`return=minimal`), sinon PostgREST refuse en 403.
+
+Service worker : précache avec `cache: reload` à l'installation, et **réseau d'abord** pour les
+scripts et styles (repli cache hors ligne) — un déploiement ne peut plus servir un mélange de
+versions JS.
 
 ## 4. Tests réellement effectués (8 novembre 2026)
 
@@ -78,6 +85,11 @@ déploiement d'aperçu.
 | Publication en ligne | `POST /rest/v1/posts` réussi, `pending=false`, file vide |
 | Réaction | persistée, compteur à 1, file vide |
 | Commentaire | **vérifié côté serveur** par requête REST authentifiée |
+| Conversation + membres | `POST conversations` **201**, deux `conversation_members` **201** |
+| Message PWA → second compte | **201**, relu avec le jeton de `tomate_peer` |
+| Réponse du second compte → PWA | reçue et affichée après rechargement |
+| Message hors ligne | mis en file, **reçu par le second compte** après reconnexion, file à 0 |
+| Opération refusée (403) | badge **Non envoyé**, jamais « en attente » à l'infini |
 | Publication hors ligne simulée | mise en file, badge « En attente d'envoi », aucune erreur affichée |
 | Reconnexion | file rejouée au rechargement, **les deux publications présentes sur le serveur**, file à 0 |
 | Précache du service worker | 12 entrées (`/`, JS, CSS, manifeste, icônes) |
@@ -91,9 +103,8 @@ déploiement d'aperçu.
   faire échouer, le test n'a donc pas pu être conclu ; seule la présence du précache est vérifiée.
 - **Installation** (`beforeinstallprompt`) : non déclenchée dans le navigateur de test.
 - **Web Bluetooth** : aucun appareil à portée ; seul le refus/annulation a été observé.
-- **Messagerie de bout en bout** : pas de second compte pour recevoir un message.
-- **RLS** : les requêtes passent avec le compte de test, mais aucune tentative d'accès croisé
-  n'a été validée (script `tooling/rls_smoke_test.sh` toujours à exécuter).
+- **RLS** : **vérifiée** côté serveur (10 assertions PASS, deux comptes) ; aucun test d'accès
+  croisé ne reste en attente.
 
 ## 5. Lancer / déployer
 

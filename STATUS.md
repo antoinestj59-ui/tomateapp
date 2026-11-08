@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.1.2
+# STATUS — TOMATE 0.1.3
 
 Dernière vérification : **8 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.2-debug.apk` — 23 Mo, `versionCode 3` |
+| APK | `artifacts/tomate-0.1.3-debug.apk` — 23 Mo, `versionCode 4` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -23,6 +23,8 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Version | `0.1.2-web` |
 | Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
 | Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
+| Messagerie | message PWA → second compte **HTTP 201 vérifié**, réponse → PWA affichée |
+| Message écrit hors ligne | mis en file, parti à la reconnexion, **reçu par le second compte** |
 | Hors ligne simulé | publication mise en file, aucune fausse erreur |
 | Reconnexion | file rejouée, **2 publications sur le serveur**, file à 0 |
 | Service worker | actif, 12 fichiers précachés, manifeste `application/manifest+json` |
@@ -30,9 +32,18 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Installation | **non testée** : `beforeinstallprompt` non déclenché en navigateur de test |
 | Rechargement sans réseau | **non conclu** : le proxy d'aperçu suspend au lieu d'échouer |
 | Bluetooth réel | **non testé** : aucun appareil à portée |
-| Messagerie bout en bout | **non testée** : pas de second compte |
+| Messagerie | **testée dans les deux sens** : message PWA reçu par le second compte, réponse reçue par la PWA |
 
 Détail complet : [`docs/07_PWA.md`](docs/07_PWA.md).
+
+### RLS et messagerie — vérifications de cette itération
+
+| Test | Résultat |
+|---|---|
+| `tooling/rls_smoke_test.sh` (deux comptes) | **10 assertions PASS, 0 FAIL** : profils, usurpation d'identifiant, publication privée, blocage, conversation, messages, non-accès du compte B |
+| Message PWA → second compte `tomate_peer` | **HTTP 201**, relu par l'autre compte |
+| Réponse du second compte → PWA | affichée dans la conversation |
+| Message rédigé hors ligne puis reconnexion | parti tout seul, **reçu par le second compte** |
 
 ## 3. Correctifs de cette itération
 
@@ -43,6 +54,12 @@ Détail complet : [`docs/07_PWA.md`](docs/07_PWA.md).
 | Commentaire web bloqué sur « En attente » après envoi | l'état n'était pas remis à jour après le vidage de la file | `markSynced` étendu aux commentaires + rechargement depuis IndexedDB |
 | « Commu… » tronqué dans la barre du bas | libellé trop large pour 5 entrées | taille de police ajustée, libellé sur une ligne |
 | Erreur « réseau indisponible » affichée hors ligne | le message d'échec était traité comme une erreur | hors ligne = simple notice « en attente », pas de bannière d'erreur |
+| Création de conversation Android inutilisable | `created_by` et les membres n'étaient jamais envoyés | `ConversationDto.createdBy`, ajout des membres et des kinds `conversation_member_add*` |
+| Ajout de membre / adhésion / réaction → **403** | `resolution=merge-duplicates` exige une politique UPDATE absente sur ces tables | `ignore-duplicates` (Android et PWA), insert simple pour `conversations` |
+| Message web → **400** | le champ local `pending` partait sur le réseau | payload limité aux colonnes serveur |
+| Opération refusée définitivement affichée « en attente » | la file supprimait l'opération sans mettre à jour le cache | `markFailed` + réconciliation au démarrage, badge **Non envoyé** |
+| PWA servant du JS périmé après mise à jour | précache et fetch en cache-first figeaient une version | `cache: reload` à l'installation, scripts/styles en **réseau d'abord** (repli cache) |
+| Profil orphelin après création de compte web | deux `ensureActor()` concurrents (démarrage + onboarding) créaient deux comptes anonymes ; le profil restait lié à celui dont la session n'était pas conservée → **403 sur toutes les écritures** | `ensureActor` sérialisé par une promesse partagée ; vérifié : `session.userId == profile.id` |
 
 ## 4. Fonctionnalités annoncées — état
 
@@ -66,12 +83,10 @@ Chiffrement de bout en bout, récupération de compte, suppression de compte ser
 
 | Test | Raison |
 |---|---|
-| RLS réelle (2 comptes, accès croisé) | migrations à valider côté projet ; script prêt |
 | Tests instrumentés Room (5) | pas d'appareil / `/dev/kvm` |
 | BLE / Wi-Fi / relais multi-téléphones | pas de radio |
 | Installation PWA | `beforeinstallprompt` non émis dans le navigateur cloud |
 | Rechargement totalement hors ligne | proxy d'aperçu suspend la requête |
-| Messages web bout en bout | pas de second compte |
 | Captures d'écran | aucun émulateur, captures navigateur possibles seulement sur demande explicite |
 
 ## 6. Décisions notables
@@ -87,11 +102,9 @@ Chiffrement de bout en bout, récupération de compte, suppression de compte ser
 ## 7. Prochaines étapes
 
 1. Tester la PWA sur un vrai téléphone : installation, mode avion, reconnexion.
-2. Exécuter `tooling/rls_smoke_test.sh` avec deux comptes.
-3. Tester la messagerie web avec un second compte.
-4. Test matériel BLE/Wi-Fi/relais Android (3 appareils).
-5. Récupération de compte (fonction serveur) et suppression de compte.
-6. E2EE avec un protocole reconnu.
+2. Test matériel BLE/Wi-Fi/relais Android (3 appareils).
+3. Récupération de compte (fonction serveur) et suppression de compte.
+4. E2EE avec un protocole reconnu.
 
 ## 8. Honnêteté de livraison
 

@@ -2,7 +2,9 @@ package tomate.data.sync
 
 import tomate.core.model.AppError
 import tomate.core.model.Outcome
+import kotlinx.serialization.builtins.ListSerializer
 import tomate.data.backend.SupabaseApi
+import tomate.data.backend.dto.ProfileDto
 import tomate.data.db.OutboxDao
 import tomate.data.db.OutboxEntity
 
@@ -85,7 +87,7 @@ class SyncEngine(
         "post_insert" -> api.insert("posts", entry.payload, upsert = true, onConflict = "id").toUnit()
         "post_delete" -> api.delete("posts", listOf("id" to "eq.${idFromPayload(entry.payload)}")).toUnit()
         "comment_insert" -> api.insert("post_comments", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "reaction_add" -> api.insert("post_reactions", entry.payload, upsert = true).toUnit()
+        "reaction_add" -> api.insert("post_reactions", entry.payload, ignoreDuplicates = true).toUnit()
         "reaction_remove" -> api.delete(
             "post_reactions",
             listOf(
@@ -96,7 +98,19 @@ class SyncEngine(
         "profile_upsert" -> api.insert("profiles", entry.payload, upsert = true, onConflict = "id").toUnit()
         "community_create" -> api.insert("communities", entry.payload, upsert = true, onConflict = "id").toUnit()
         "community_join" -> api.insert("community_members", entry.payload, upsert = true).toUnit()
-        "conversation_create" -> api.insert("conversations", entry.payload, upsert = true, onConflict = "id").toUnit()
+        "conversation_create" -> api.insert(
+            "conversations",
+            entry.payload,
+            representation = false,
+        ).toUnit()
+        "conversation_member_add" -> api.insert(
+            "conversation_members",
+            entry.payload,
+            ignoreDuplicates = true,
+            onConflict = "conversation_id,user_id",
+            representation = false,
+        ).toUnit()
+        "conversation_member_add_handle" -> addMemberByHandle(entry.payload)
         "message_send" -> api.insert("messages", entry.payload, upsert = true, onConflict = "id").toUnit()
         "report_create" -> api.insert("reports", entry.payload, upsert = true, onConflict = "id").toUnit()
         "block_create" -> api.insert("blocks", entry.payload, upsert = true).toUnit()
@@ -106,6 +120,32 @@ class SyncEngine(
                 userMessage = "Opération inconnue en attente.",
             ),
         )
+    }
+
+    /** Resolves a handle at delivery time: an offline conversation still reaches its peer. */
+    private suspend fun addMemberByHandle(payload: String): Outcome<Unit> {
+        val conversationId = fieldFromPayload(payload, "conversation_id")
+        val handle = fieldFromPayload(payload, "handle")
+        if (conversationId.isBlank() || handle.isBlank()) {
+            return Outcome.Failure(AppError.Validation("member_payload", "Membre de conversation incomplet."))
+        }
+        return when (val response = api.select("profiles", listOf("select" to "id", "handle" to "eq.$handle"))) {
+            is Outcome.Failure -> response
+            is Outcome.Success -> {
+                val userId = runCatching {
+                    SupabaseApi.json.decodeFromString(ListSerializer(ProfileDto.serializer()), response.value)
+                        .firstOrNull()?.id
+                }.getOrNull()
+                    ?: return Outcome.Failure(AppError.NotFound("Destinataire introuvable : @$handle"))
+                api.insert(
+                    "conversation_members",
+                    """{"conversation_id":"$conversationId","user_id":"$userId"}""",
+                    ignoreDuplicates = true,
+                    onConflict = "conversation_id,user_id",
+                    representation = false,
+                ).toUnit()
+            }
+        }
     }
 
     private fun <T> Outcome<T>.toUnit(): Outcome<Unit> = when (this) {

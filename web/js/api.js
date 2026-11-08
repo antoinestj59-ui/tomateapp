@@ -104,7 +104,7 @@ export async function ensureRemoteSession() {
 }
 
 /** Always resolves: remote account when possible, otherwise a persisted local identity. */
-export async function ensureActor() {
+async function resolveActor() {
   const existing = await getSession();
   if (existing?.local) return existing;
   if (navigator.onLine) {
@@ -121,6 +121,22 @@ export async function ensureActor() {
     }
   }
   return existing ?? createLocalSession();
+}
+
+let actorInFlight = null;
+
+/**
+ * Serialised on purpose: the boot and the onboarding submit used to call this concurrently.
+ * Two anonymous sign-ups meant the profile could be bound to the account whose session was
+ * never persisted, so every write of that profile failed RLS with 403.
+ */
+export function ensureActor() {
+  if (!actorInFlight) {
+    actorInFlight = resolveActor().finally(() => {
+      actorInFlight = null;
+    });
+  }
+  return actorInFlight;
 }
 
 /** Connecte le compte local au réseau et réécrit les identifiants locaux en une passe. */

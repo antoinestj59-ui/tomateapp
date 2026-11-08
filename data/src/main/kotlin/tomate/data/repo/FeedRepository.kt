@@ -193,7 +193,7 @@ class FeedRepository(
         return if (nextReacted) {
             val wire = ReactionInsert(postId = postId, userId = userId)
             val payload = SupabaseApi.json.encodeToString(ReactionInsert.serializer(), wire)
-            when (val remote = api.insert("post_reactions", payload, upsert = true)) {
+            when (val remote = api.insert("post_reactions", payload, ignoreDuplicates = true)) {
                 is Outcome.Success -> Outcome.Success(true)
                 is Outcome.Failure -> {
                     enqueue("reaction_add", "$postId:$userId", payload)
