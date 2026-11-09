@@ -46,16 +46,30 @@ Détail complet : [`docs/07_PWA.md`](docs/07_PWA.md).
 | Message rédigé hors ligne puis reconnexion | parti tout seul, **reçu par le second compte** |
 
 
-## 2 bis. Stories — état exact
+## 2 bis. Stories — vérifié en ligne le 9 novembre 2026
 
-| Élément | État |
+Migration `supabase/migrations/0004_stories.sql` appliquée par vous dans le SQL Editor.
+
+| Test | Résultat |
 |---|---|
-| Schéma | `supabase/migrations/0004_stories.sql` (tables `stories`, `story_views`, fonctions `can_view_story_author` / `can_view_story`, vue `stories_feed`) |
-| Application du schéma | **à faire par vous** : la clé publishable ne permet pas de créer des tables. Collez `supabase/ALL_IN_ONE.sql` (ou `0004_stories.sql` seul) dans le SQL Editor Supabase. |
-| Android | Room v2 + migration 1→2, `StoryRepository`, file d'attente `story_insert` / `story_view` / `story_delete`, bandeau de stories, visionneuse, composeur — **compile** (`:app:assembleDebug` BUILD SUCCESSFUL) |
-| PWA | bandeau de stories, visionneuse 24 h, composeur avec fonds, cache IndexedDB, file d'attente, expiration à la minute — **écrit, pas encore exécuté en ligne faute de tables** |
-| Vérification réseau | **en attente** de la migration : aucun test en ligne n'est revendiqué avant cela |
-| Expiration | 24 h côté serveur (`expires_at`, refus de sélection) et côté client (filtre + minuteur) |
+| Création par le compte A | **HTTP 201** |
+| Visibilité par le compte B | oui, `viewed_by_me = false` |
+| B marque la story vue | **201**, puis `viewed_by_me = true` |
+| A voit la liste des vues | oui (identifiant du lecteur, horodatage) |
+| B tente de créer une story au nom de A | **403** (RLS `stories_insert_self`) |
+| B tente de supprimer la story de A | 204 sans effet : la story reste |
+| Story expirant en 70 s | visible avant, **absente de `stories_feed` après 80 s** |
+| Création avec une date déjà expirée | **403** |
+| Rejeu de la même vue | 201, **une seule ligne** en base |
+| D falsifie `viewer_id` (vue au nom de C) | **403** |
+| PWA : story écrite réseau coupé | 1 opération en file, badge « en attente » |
+| PWA : reconnexion | envoi automatique, story **présente sur le serveur**, badge effacé |
+| PWA : suppression par l'auteur | story retirée du serveur |
+| Visibilité PWA → autre compte (`story_c`) | story de `web_story1` lue et marquée vue (**201**) |
+
+Android : Room v2 (migration 1→2), `StoryRepository`, kinds `story_insert` / `story_view` /
+`story_delete`, bandeau, visionneuse et composeur — **compile et tests unitaires PASS**, mais
+**non exécuté sur appareil** (aucun appareil disponible ici).
 
 ## 3. Correctifs de cette itération
 
@@ -88,7 +102,6 @@ météo, file d'attente, page de permissions, thème, installation (manifeste + 
 
 ### Absent — déclaré absent
 
-Stories : implémentées, **en attente de la migration SQL** pour être vérifiées en ligne.
 Chiffrement de bout en bout, récupération de compte, suppression de compte serveur, événements,
 cartes hors ligne, appels, notifications push, mesh navigateur.
 

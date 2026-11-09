@@ -459,12 +459,22 @@ function storyBubble(story) {
 
 function storiesBar() {
   const alive = S.stories.filter(storyAlive);
+  // One bubble per author, like every story bar: the viewer shows that author's latest story.
+  const latest = new Map();
+  alive.forEach((story) => {
+    const current = latest.get(story.author_id);
+    if (!current || new Date(story.created_at) > new Date(current.created_at)) latest.set(story.author_id, story);
+  });
+  const ordered = [...latest.values()].sort((a, b) => {
+    const mine = Number(b.author_id === S.profile?.id) - Number(a.author_id === S.profile?.id);
+    return mine || new Date(b.created_at) - new Date(a.created_at);
+  });
   return `<div class="stories" aria-label="Stories">
     <button class="story-bubble" data-act="story-new" aria-label="Créer une story">
       <span class="story-ring add"><span class="story-face">+</span></span>
       <span class="story-name">Votre story</span>
     </button>
-    ${alive.map(storyBubble).join('')}
+    ${ordered.map(storyBubble).join('')}
   </div>`;
 }
 
@@ -1423,6 +1433,8 @@ async function syncNow({ silent = false } = {}) {
     // instead of guessing from in-memory copies.
     const freshFeed = await cacheGet('feed');
     if (Array.isArray(freshFeed)) S.feed = freshFeed;
+    const freshStories = await cacheGet('stories');
+    if (Array.isArray(freshStories)) S.stories = freshStories.filter(storyAlive);
     if (S.route === 'post' && S.param) {
       const freshComments = await cacheGet(`comments:${S.param}`);
       if (Array.isArray(freshComments)) S.comments = freshComments;

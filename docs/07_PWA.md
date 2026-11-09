@@ -41,7 +41,7 @@ Client web de TOMATE : installable, hors ligne après le premier chargement, bra
 | Récupération de compte par code | **absente** |
 | Notifications push | **absentes** (notifications locales seulement) |
 | Appels audio/vidéo | **absents** |
-| Stories | **portées** : bandeau, visionneuse 24 h, composeur, file `story_create` / `story_view` / `story_delete`. Vérification en ligne en attente de la migration `0004_stories.sql`. |
+| Stories | **testées en ligne** : création **201**, visible par un autre compte, vue enregistrée, story écrite hors ligne envoyée à la reconnexion, suppression par l'auteur. Bandeau, visionneuse 24 h, composeur. |
 | Événements, cartes hors ligne | **non portés** (itérations futures) |
 
 Les permissions ne sont demandées qu'au moment de l'action, avec l'explication affichée à côté.
