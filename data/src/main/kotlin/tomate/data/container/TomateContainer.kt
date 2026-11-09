@@ -17,6 +17,7 @@ import tomate.data.repo.FeedRepository
 import tomate.data.repo.MessagingRepository
 import tomate.data.repo.ModerationRepository
 import tomate.data.repo.ProfileRepository
+import tomate.data.repo.StoryRepository
 import tomate.data.security.CryptoBox
 import tomate.data.security.KeystoreCryptoBox
 import tomate.data.sync.SyncEngine
@@ -55,6 +56,15 @@ class TomateContainer(
             api = api,
             postDao = database.postDao(),
             commentDao = database.commentDao(),
+            profileDao = database.profileDao(),
+            outboxDao = database.outboxDao(),
+            session = session,
+        )
+    }
+    val stories: StoryRepository by lazy {
+        StoryRepository(
+            api = api,
+            storyDao = database.storyDao(),
             profileDao = database.profileDao(),
             outboxDao = database.outboxDao(),
             session = session,

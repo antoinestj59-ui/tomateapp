@@ -32,6 +32,7 @@ import {
   MAX_COMMENT_LENGTH,
   MAX_MESSAGE_LENGTH,
   MAX_POST_LENGTH,
+  MAX_STORY_LENGTH,
 } from './config.js';
 
 const app = document.getElementById('app');
@@ -48,6 +49,7 @@ const S = {
   route: 'feed',
   param: null,
   feed: [],
+  stories: [],
   comments: [],
   conversations: [],
   messages: [],
@@ -196,6 +198,7 @@ const ICON = {
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   download: svg('<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/>'),
   weather: svg('<circle cx="8" cy="8" r="3"/><path d="M8 2v1.5M2 8h1.5M3.8 3.8l1 1M12.2 3.8l-1 1"/><path d="M9 19h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.4 1.5A3.5 3.5 0 0 0 9 19Z"/>'),
+  close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   people: svg('<circle cx="12" cy="8" r="3.2"/><path d="M6 20c0-3 2.7-5 6-5s6 2 6 5"/>'),
 };
 
@@ -338,6 +341,7 @@ function feedView() {
     ${S.lastError ? notice(S.lastError, 'error', true) : ''}
     ${S.session?.local ? notice('Compte local : vos publications sont conservées et seront envoyées dès que le réseau sera disponible.', 'info') : ''}
     ${pending > 0 ? notice(`${pending} publication(s) en attente d'envoi.`, 'warning') : ''}
+    ${storiesBar()}
     <div class="card">
       <form data-form="publish" class="compose">
         <label for="compose" class="muted small" style="font-weight:600">Partager quelque chose…</label>
@@ -423,6 +427,212 @@ async function loadFeed({ refresh = false } = {}) {
   } catch (error) {
     S.lastError = humanError(error);
   }
+}
+
+// --------------------------------------------------------------------- stories
+
+const STORY_TTL_MS = 24 * 60 * 60 * 1000;
+
+const storyAlive = (story) => new Date(story?.expires_at ?? 0).getTime() > Date.now();
+
+const storyRemaining = (story) => {
+  const left = Math.max(0, new Date(story.expires_at).getTime() - Date.now());
+  const minutes = Math.round(left / 60000);
+  if (minutes >= 60) return `expire dans ${Math.round(minutes / 60)} h`;
+  if (minutes >= 1) return `expire dans ${minutes} min`;
+  return 'expire bientôt';
+};
+
+function storyBubble(story) {
+  const mine = story.author_id === S.profile?.id;
+  const label = mine ? 'Vous' : story.author_handle || 'Anonyme';
+  const name = story.author_display_name || story.author_handle || 'Anonyme';
+  return `<button class="story-bubble" data-act="story-open" data-id="${esc(story.id)}" aria-label="Story de ${esc(name)}">
+    <span class="story-ring ${story.viewed_by_me ? 'seen' : ''}">
+      <span class="story-face">${esc(initials(name))}</span>
+    </span>
+    <span class="story-name">${esc(label)}</span>
+    ${story.pending ? '<span class="story-flag">en attente</span>' : ''}
+    ${story.failed ? '<span class="story-flag ko">non envoyée</span>' : ''}
+  </button>`;
+}
+
+function storiesBar() {
+  const alive = S.stories.filter(storyAlive);
+  return `<div class="stories" aria-label="Stories">
+    <button class="story-bubble" data-act="story-new" aria-label="Créer une story">
+      <span class="story-ring add"><span class="story-face">+</span></span>
+      <span class="story-name">Votre story</span>
+    </button>
+    ${alive.map(storyBubble).join('')}
+  </div>`;
+}
+
+async function loadStories({ refresh = false } = {}) {
+  const cached = await cacheGet('stories');
+  if (Array.isArray(cached)) S.stories = cached.filter(storyAlive);
+  if (!refresh || !ONLINE()) return;
+  try {
+    await ensureRemoteSession();
+    const rows = await rest('stories_feed', { query: 'select=*&order=created_at.asc&limit=120' });
+    const seen = new Map(S.stories.map((s) => [s.id, s.viewed_by_me === true]));
+    const pending = S.stories.filter((s) => s.pending || s.failed);
+    const merged = rows
+      .map((row) => ({ ...row, viewed_by_me: row.viewed_by_me === true || seen.get(row.id) === true }))
+      .filter(storyAlive);
+    const missing = pending.filter((p) => !merged.some((m) => m.id === p.id));
+    S.stories = [...merged, ...missing].filter(storyAlive);
+    await cacheSet('stories', S.stories);
+    S.lastError = null;
+  } catch (error) {
+    S.lastError = humanError(error);
+  }
+}
+
+const STORY_BACKGROUNDS = ['sunset', 'ocean', 'forest', 'night', 'plain'];
+
+function showStoryViewer(story) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'story-dialog';
+  const mine = story.author_id === S.profile?.id;
+  dialog.innerHTML = `
+    <div class="story-canvas bg-${STORY_BACKGROUNDS.includes(story.background) ? story.background : 'sunset'}">
+      <div class="story-top">
+        <div class="grow">
+          <strong>${esc(story.author_display_name || story.author_handle || 'Anonyme')}</strong>
+          <div class="tiny" style="opacity:.8">@${esc(story.author_handle ?? '')} · ${esc(storyRemaining(story))}</div>
+        </div>
+        ${mine ? `<button class="icon-btn" data-act="story-delete" data-id="${esc(story.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
+        <button class="icon-btn" data-act="story-close" aria-label="Fermer">${ICON.close}</button>
+      </div>
+      <div class="story-text" data-story-body="${esc(story.id)}"></div>
+      <div class="story-foot">Disparaît automatiquement 24 h après sa publication.</div>
+    </div>`;
+  document.body.appendChild(dialog);
+  dialog.querySelector('[data-story-body]').textContent = story.body;
+  dialog.showModal();
+  const close = () => {
+    if (dialog.open) dialog.close();
+    dialog.remove();
+  };
+  dialog.addEventListener('click', (event) => {
+    if (event.target.closest('[data-act="story-close"]') || event.target === dialog) close();
+  });
+  dialog.addEventListener('cancel', () => dialog.remove());
+  return { close, dialog };
+}
+
+async function openStory(id) {
+  const story = S.stories.find((s) => s.id === id && storyAlive(s));
+  if (!story) return toast('Cette story a expiré.');
+  showStoryViewer(story);
+  if (story.viewed_by_me) return;
+  story.viewed_by_me = true;
+  await cacheSet('stories', S.stories);
+  await enqueue('story_view', { story_id: story.id, viewer_id: S.profile.id });
+  if (ONLINE()) await syncNow({ silent: true });
+}
+
+function storyComposer() {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.innerHTML = `
+      <h2>Nouvelle story</h2>
+      <p class="muted small">Visible 24 h par les personnes autorisées à voir votre profil, puis supprimée de l'affichage — même hors ligne.</p>
+      <div class="story-preview bg-sunset" id="story-preview"><span>Votre texte…</span></div>
+      <div class="field" style="margin-top:10px">
+        <label for="story-text">Texte de la story</label>
+        <textarea class="textarea" id="story-text" maxlength="${MAX_STORY_LENGTH}" placeholder="Ce que vous voulez partager aujourd'hui…"></textarea>
+      </div>
+      <div class="story-palette" role="group" aria-label="Fond de la story">
+        ${STORY_BACKGROUNDS.map((bg) => `<button type="button" class="story-swatch bg-${bg} ${bg === 'sunset' ? 'active' : ''}" data-bg="${bg}" aria-label="Fond ${bg}" aria-pressed="${bg === 'sunset'}"></button>`).join('')}
+      </div>
+      <div class="row">
+        <button class="btn btn-soft" data-choice="cancel">Annuler</button>
+        <button class="btn btn-primary" data-choice="ok">Publier</button>
+      </div>`;
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    const text = dialog.querySelector('#story-text');
+    const preview = dialog.querySelector('#story-preview');
+    text.focus();
+    let background = 'sunset';
+    text.addEventListener('input', () => {
+      preview.textContent = text.value.trim() || 'Votre texte…';
+      preview.classList.toggle('placeholder', !text.value.trim());
+    });
+    dialog.addEventListener('click', (event) => {
+      const swatch = event.target.closest('[data-bg]');
+      if (swatch) {
+        background = swatch.dataset.bg;
+        preview.className = `story-preview bg-${background}${text.value.trim() ? '' : ' placeholder'}`;
+        dialog.querySelectorAll('[data-bg]').forEach((node) => {
+          const active = node.dataset.bg === background;
+          node.classList.toggle('active', active);
+          node.setAttribute('aria-pressed', String(active));
+        });
+        return;
+      }
+      const choice = event.target.closest('[data-choice]')?.dataset.choice;
+      if (!choice) return;
+      const value = text.value.trim();
+      dialog.close();
+      dialog.remove();
+      if (choice === 'ok' && !value) {
+        toast("Écrivez d'abord un texte.");
+        resolve(null);
+        return;
+      }
+      resolve(choice === 'ok' ? { text: value, background } : null);
+    });
+    dialog.addEventListener('cancel', () => {
+      dialog.remove();
+      resolve(null);
+    });
+  });
+}
+
+async function publishStory(body, background) {
+  const text = String(body ?? '').trim();
+  if (!text) return;
+  const story = {
+    id: crypto.randomUUID(),
+    author_id: S.profile.id,
+    author_handle: S.profile.handle,
+    author_display_name: S.profile.display_name,
+    body: text.slice(0, MAX_STORY_LENGTH),
+    background: STORY_BACKGROUNDS.includes(background) ? background : 'sunset',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + STORY_TTL_MS).toISOString(),
+    viewed_by_me: true,
+    pending: true,
+  };
+  S.stories = [story, ...S.stories];
+  await cacheSet('stories', S.stories);
+  await enqueue('story_create', {
+    id: story.id,
+    author_id: story.author_id,
+    body: story.body,
+    background: story.background,
+  });
+  render();
+  await syncNow();
+}
+
+async function deleteStory(id) {
+  const ok = await confirmDialog({
+    title: 'Supprimer cette story ?',
+    text: 'Elle disparaîtra immédiatement, pour vous comme pour les autres.',
+    confirmLabel: 'Supprimer',
+    danger: true,
+  });
+  if (!ok) return false;
+  S.stories = S.stories.filter((s) => s.id !== id);
+  await cacheSet('stories', S.stories);
+  await enqueue('story_delete', { id });
+  render();
+  await syncNow({ silent: true });
+  return true;
 }
 
 async function publishPost(body) {
@@ -1261,7 +1471,7 @@ async function navigate() {
   switch (S.route) {
     case 'feed':
       render();
-      await loadFeed({ refresh: true });
+      await Promise.all([loadFeed({ refresh: true }), loadStories({ refresh: true })]);
       S.queue = await pendingCount();
       if (ONLINE()) await syncNow({ silent: true });
       break;
@@ -1364,10 +1574,32 @@ document.addEventListener('click', async (event) => {
         break;
       }
       case 'refresh':
-        await loadFeed({ refresh: true });
+        await Promise.all([loadFeed({ refresh: true }), loadStories({ refresh: true })]);
         await syncNow({ silent: true });
         render();
         break;
+      case 'story-new': {
+        const draft = await storyComposer();
+        if (draft) await publishStory(draft.text, draft.background);
+        break;
+      }
+      case 'story-open':
+        await openStory(trigger.dataset.id);
+        break;
+      case 'story-close': {
+        const dialog = trigger.closest('dialog');
+        if (dialog?.open) dialog.close();
+        dialog?.remove();
+        break;
+      }
+      case 'story-delete': {
+        const dialog = trigger.closest('dialog');
+        if (await deleteStory(trigger.dataset.id)) {
+          if (dialog?.open) dialog.close();
+          dialog?.remove();
+        }
+        break;
+      }
       case 'refresh-messages':
         await loadConversations({ refresh: true });
         render();
@@ -1562,6 +1794,15 @@ window.addEventListener('beforeinstallprompt', (event) => {
 
 window.addEventListener('hashchange', () => navigate());
 
+// A 24-hour story must disappear on screen at the right minute, not only on next launch.
+setInterval(async () => {
+  const alive = S.stories.filter(storyAlive);
+  if (alive.length === S.stories.length) return;
+  S.stories = alive;
+  await cacheSet('stories', S.stories);
+  if (S.route === 'feed') render();
+}, 60_000);
+
 async function boot() {
   try {
     await applyTheme(await getItem('kv', 'theme'));
@@ -1570,6 +1811,8 @@ async function boot() {
     S.weather = await cachedWeather();
     const cachedFeed = await cacheGet('feed');
     if (Array.isArray(cachedFeed)) S.feed = cachedFeed;
+    const cachedStories = await cacheGet('stories');
+    if (Array.isArray(cachedStories)) S.stories = cachedStories.filter(storyAlive);
     const cachedMemberships = await cacheGet('memberships');
     if (Array.isArray(cachedMemberships)) S.memberships = new Set(cachedMemberships);
     await refreshCounts();

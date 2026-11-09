@@ -31,7 +31,8 @@ la connexion est mauvaise ou chère.
 | Écran | Contenu réel | Dépendances |
 |---|---|---|
 | **Onboarding** | Pseudo (validé 3–20 `[a-z0-9_]`, réservés refusés), visibilité du profil, avertissement explicite sur le compte anonyme | `ProfileRepository`, Supabase |
-| **Accueil / Fil** | Composeur (2000 caractères), fil local, réactions, compteur de commentaires, bandeau hors ligne, compteur d'opérations en attente | Room, `FeedRepository`, `SyncEngine` |
+| **Accueil / Fil** | Bandeau de stories (24 h), composeur (2000 caractères), fil local, réactions, compteur de commentaires, bandeau hors ligne, compteur d'opérations en attente | Room, `FeedRepository`, `StoryRepository`, `SyncEngine` |
+| **Stories** | Création (texte 300 caractères, 5 fonds), visionneuse, marquage « vue », suppression par l'auteur, expiration 24 h même hors ligne | Room, `StoryRepository`, RLS `stories` |
 | **Détail publication** | Publication, commentaires (ajout, suppression), réaction, signalement, blocage de l'auteur, suppression de sa publication | Room, modération |
 | **Communautés** | Liste réelle, création (publique/privée), adhésion, demande en attente, sortie | Room, `CommunityRepository` |
 | **Détail communauté** | Description, nombre de membres, rôle, composeur réservé aux membres actifs, fil de la communauté | Room, RLS |

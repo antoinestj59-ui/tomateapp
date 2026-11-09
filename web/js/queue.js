@@ -24,6 +24,11 @@ const ENDPOINTS = {
   conversation_create: (p) => ['conversations', { method: 'POST', body: p, prefer: 'return=minimal' }],
   conversation_member_add: (p) => ['conversation_members', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'conversation_id,user_id' }],
   message_send: (p) => ['messages', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
+  // Plain insert: stories has no UPDATE policy, a merge-duplicates would be refused (403).
+  story_create: (p) => ['stories', { method: 'POST', body: p, prefer: 'return=minimal' }],
+  // story_views has no UPDATE policy: ignoring the duplicate is the only correct replay.
+  story_view: (p) => ['story_views', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'story_id,viewer_id' }],
+  story_delete: (p) => ['stories', { method: 'DELETE', query: `id=eq.${p.id}` }],
   report_create: (p) => ['reports', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
 };
 
@@ -43,6 +48,10 @@ async function markFailed(kind, payload) {
     const messages = (await cacheGet(key)) ?? [];
     await cacheSet(key, messages.map((m) => (m.id === payload.id ? { ...m, pending: false, failed: true } : m)));
   }
+  if (kind === 'story_create') {
+    const stories = (await cacheGet('stories')) ?? [];
+    await cacheSet('stories', stories.map((s) => (s.id === payload.id ? { ...s, pending: false, failed: true } : s)));
+  }
 }
 
 async function markSynced(kind, payload) {
@@ -60,6 +69,10 @@ async function markSynced(kind, payload) {
     const messages = (await cacheGet(key)) ?? [];
     await cacheSet(key, messages.map((m) => (m.id === payload.id ? { ...m, pending: false } : m)));
   }
+  if (kind === 'story_create') {
+    const stories = (await cacheGet('stories')) ?? [];
+    await cacheSet('stories', stories.map((s) => (s.id === payload.id ? { ...s, pending: false } : s)));
+  }
 }
 
 /**
@@ -70,7 +83,11 @@ async function reconcilePending() {
   const ops = await getAll('outbox');
   const queued = new Set(ops.map((op) => String(op.payload?.id)));
   const keys = (await getAllKeys('cache')).filter(
-    (key) => key === 'feed' || String(key).startsWith('messages:') || String(key).startsWith('comments:'),
+    (key) =>
+      key === 'feed' ||
+      key === 'stories' ||
+      String(key).startsWith('messages:') ||
+      String(key).startsWith('comments:'),
   );
   for (const key of keys) {
     const list = await cacheGet(key);

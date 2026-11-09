@@ -215,6 +215,40 @@ interface MessageDao {
 }
 
 @Dao
+interface StoryDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(story: StoryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(stories: List<StoryEntity>)
+
+    /** Active stories only: the 24-hour window is enforced by the query, not by the UI. */
+    @Query("SELECT * FROM stories WHERE expiresAt > :now ORDER BY createdAt ASC")
+    fun observeActive(now: Long): Flow<List<StoryEntity>>
+
+    @Query("SELECT * FROM stories WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): StoryEntity?
+
+    @Query("SELECT * FROM stories")
+    suspend fun all(): List<StoryEntity>
+
+    @Query("UPDATE stories SET viewedByMe = 1 WHERE id = :id")
+    suspend fun markViewed(id: String)
+
+    @Query("UPDATE stories SET pendingSync = 0 WHERE id = :id")
+    suspend fun markSynced(id: String)
+
+    @Query("DELETE FROM stories WHERE expiresAt <= :now AND pendingSync = 0")
+    suspend fun deleteExpired(now: Long)
+
+    @Query("DELETE FROM stories WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("UPDATE stories SET authorId = :newId WHERE authorId = :oldId")
+    suspend fun reassignAuthor(oldId: String, newId: String)
+}
+
+@Dao
 interface OutboxDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun enqueue(entry: OutboxEntity): Long

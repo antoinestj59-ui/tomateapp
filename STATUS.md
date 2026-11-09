@@ -1,6 +1,6 @@
-# STATUS — TOMATE 0.1.3
+# STATUS — TOMATE 0.1.4
 
-Dernière vérification : **8 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
+Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
 
 Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est déclaré comme tel.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.3-debug.apk` — 23 Mo, `versionCode 4` |
+| APK | `artifacts/tomate-0.1.4-debug.apk` — 23 Mo, `versionCode 5` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -20,7 +20,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 |---|---|
 | Code | `web/` (sans build), `sites.web.json` |
 | Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
-| Version | `0.1.2-web` |
+| Version | `0.1.4-web` |
 | Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
 | Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
 | Messagerie | message PWA → second compte **HTTP 201 vérifié**, réponse → PWA affichée |
@@ -44,6 +44,18 @@ Détail complet : [`docs/07_PWA.md`](docs/07_PWA.md).
 | Message PWA → second compte `tomate_peer` | **HTTP 201**, relu par l'autre compte |
 | Réponse du second compte → PWA | affichée dans la conversation |
 | Message rédigé hors ligne puis reconnexion | parti tout seul, **reçu par le second compte** |
+
+
+## 2 bis. Stories — état exact
+
+| Élément | État |
+|---|---|
+| Schéma | `supabase/migrations/0004_stories.sql` (tables `stories`, `story_views`, fonctions `can_view_story_author` / `can_view_story`, vue `stories_feed`) |
+| Application du schéma | **à faire par vous** : la clé publishable ne permet pas de créer des tables. Collez `supabase/ALL_IN_ONE.sql` (ou `0004_stories.sql` seul) dans le SQL Editor Supabase. |
+| Android | Room v2 + migration 1→2, `StoryRepository`, file d'attente `story_insert` / `story_view` / `story_delete`, bandeau de stories, visionneuse, composeur — **compile** (`:app:assembleDebug` BUILD SUCCESSFUL) |
+| PWA | bandeau de stories, visionneuse 24 h, composeur avec fonds, cache IndexedDB, file d'attente, expiration à la minute — **écrit, pas encore exécuté en ligne faute de tables** |
+| Vérification réseau | **en attente** de la migration : aucun test en ligne n'est revendiqué avant cela |
+| Expiration | 24 h côté serveur (`expires_at`, refus de sélection) et côté client (filtre + minuteur) |
 
 ## 3. Correctifs de cette itération
 
@@ -76,8 +88,9 @@ météo, file d'attente, page de permissions, thème, installation (manifeste + 
 
 ### Absent — déclaré absent
 
-Chiffrement de bout en bout, récupération de compte, suppression de compte serveur, stories,
-événements, cartes hors ligne, appels, notifications push, mesh navigateur.
+Stories : implémentées, **en attente de la migration SQL** pour être vérifiées en ligne.
+Chiffrement de bout en bout, récupération de compte, suppression de compte serveur, événements,
+cartes hors ligne, appels, notifications push, mesh navigateur.
 
 ## 5. Ce qui n'a pas pu être testé ici
 

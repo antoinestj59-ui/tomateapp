@@ -111,6 +111,15 @@ class SyncEngine(
             representation = false,
         ).toUnit()
         "conversation_member_add_handle" -> addMemberByHandle(entry.payload)
+        "story_insert" -> api.insert("stories", entry.payload, representation = false).toUnit()
+        "story_view" -> api.insert(
+            "story_views",
+            entry.payload,
+            ignoreDuplicates = true,
+            onConflict = "story_id,viewer_id",
+            representation = false,
+        ).toUnit()
+        "story_delete" -> api.delete("stories", listOf("id" to "eq.${idFromPayload(entry.payload)}")).toUnit()
         "message_send" -> api.insert("messages", entry.payload, upsert = true, onConflict = "id").toUnit()
         "report_create" -> api.insert("reports", entry.payload, upsert = true, onConflict = "id").toUnit()
         "block_create" -> api.insert("blocks", entry.payload, upsert = true).toUnit()

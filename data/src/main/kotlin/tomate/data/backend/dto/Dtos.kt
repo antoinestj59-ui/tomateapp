@@ -54,6 +54,34 @@ data class PostInsert(
     val visibility: String = "Public",
 )
 
+/** Row from the `stories_feed` view: story + author + whether the reader already saw it. */
+@Serializable
+data class StoryRowDto(
+    val id: String,
+    @SerialName("author_id") val authorId: String,
+    @SerialName("author_handle") val authorHandle: String = "",
+    @SerialName("author_display_name") val authorDisplayName: String = "",
+    val body: String,
+    val background: String = "sunset",
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("viewed_by_me") val viewedByMe: Boolean = false,
+)
+
+@Serializable
+data class StoryInsert(
+    val id: String,
+    @SerialName("author_id") val authorId: String,
+    val body: String,
+    val background: String = "sunset",
+)
+
+@Serializable
+data class StoryViewInsert(
+    @SerialName("story_id") val storyId: String,
+    @SerialName("viewer_id") val viewerId: String,
+)
+
 @Serializable
 data class CommentDto(
     val id: String,

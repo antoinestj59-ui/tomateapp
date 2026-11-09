@@ -60,6 +60,25 @@ data class Post(
     val deleted: Boolean = false,
 )
 
+/**
+ * A 24-hour story. `expiresAt` comes from the server when available and is always recomputed
+ * locally on creation, so an offline story still disappears on time.
+ */
+data class Story(
+    val id: String,
+    val authorId: String,
+    val authorHandle: String = "",
+    val authorDisplayName: String = "",
+    val body: String,
+    val background: String = "sunset",
+    val createdAt: Long = 0L,
+    val expiresAt: Long = 0L,
+    val viewedByMe: Boolean = false,
+    val pendingSync: Boolean = false,
+) {
+    fun isExpired(now: Long): Boolean = expiresAt <= now
+}
+
 data class Comment(
     val id: String,
     val postId: String,

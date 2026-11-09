@@ -11,6 +11,7 @@ import tomate.core.model.Message
 import tomate.core.model.MessageDeliveryState
 import tomate.core.model.Post
 import tomate.core.model.Profile
+import tomate.core.model.Story
 import tomate.core.model.TransportKind
 import tomate.core.model.Visibility
 import tomate.data.backend.dto.CommentDto
@@ -19,12 +20,14 @@ import tomate.data.backend.dto.ConversationDto
 import tomate.data.backend.dto.FeedRowDto
 import tomate.data.backend.dto.MessageDto
 import tomate.data.backend.dto.ProfileDto
+import tomate.data.backend.dto.StoryRowDto
 import tomate.data.db.CommentEntity
 import tomate.data.db.CommunityEntity
 import tomate.data.db.ConversationEntity
 import tomate.data.db.MessageEntity
 import tomate.data.db.PostEntity
 import tomate.data.db.ProfileEntity
+import tomate.data.db.StoryEntity
 
 /** Supabase returns `2026-11-08T20:59:51.01234+00:00`; Room stores epoch millis. */
 fun isoToMillis(value: String?): Long = value?.let { raw ->
@@ -38,6 +41,32 @@ fun visibilityFromWire(value: String?): Visibility = when (value?.lowercase()) {
     "private" -> Visibility.Private
     else -> Visibility.Public
 }
+
+fun StoryRowDto.toEntity(): StoryEntity = StoryEntity(
+    id = id,
+    authorId = authorId,
+    authorHandle = authorHandle,
+    authorDisplayName = authorDisplayName,
+    body = body,
+    background = background,
+    createdAt = isoToMillis(createdAt),
+    expiresAt = isoToMillis(expiresAt),
+    viewedByMe = viewedByMe,
+    pendingSync = false,
+)
+
+fun StoryEntity.toDomain(): Story = Story(
+    id = id,
+    authorId = authorId,
+    authorHandle = authorHandle,
+    authorDisplayName = authorDisplayName,
+    body = body,
+    background = background,
+    createdAt = createdAt,
+    expiresAt = expiresAt,
+    viewedByMe = viewedByMe,
+    pendingSync = pendingSync,
+)
 
 fun ProfileDto.toEntity(isMe: Boolean): ProfileEntity = ProfileEntity(
     id = id,

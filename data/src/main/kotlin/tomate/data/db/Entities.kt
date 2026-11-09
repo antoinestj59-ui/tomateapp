@@ -163,6 +163,21 @@ data class CommunityMemberCacheEntity(
     val status: MembershipStatus,
 )
 
+/** 24-hour story, cached like any other content so it stays readable offline until it expires. */
+@Entity(tableName = "stories", indices = [Index("authorId"), Index("expiresAt")])
+data class StoryEntity(
+    @PrimaryKey val id: String,
+    val authorId: String,
+    val authorHandle: String,
+    val authorDisplayName: String,
+    val body: String,
+    val background: String,
+    val createdAt: Long,
+    val expiresAt: Long,
+    val viewedByMe: Boolean,
+    val pendingSync: Boolean,
+)
+
 /** Aggregate row used by the message list screen. */
 data class ConversationSummaryRow(
     @Embedded val conversation: ConversationEntity,
