@@ -66,6 +66,12 @@ const S = {
   btDevice: null,
   theme: 'auto',
   storage: null,
+  draft: '',
+  draftCommunity: {},
+  postMedia: null,
+  communityMembers: {},
+  communityFilter: '',
+  search: { q: '', results: [], busy: false, error: null },
 };
 
 const ONLINE = () => navigator.onLine;
@@ -205,7 +211,19 @@ const ICON = {
   weather: svg('<circle cx="8" cy="8" r="3"/><path d="M8 2v1.5M2 8h1.5M3.8 3.8l1 1M12.2 3.8l-1 1"/><path d="M9 19h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.4 1.5A3.5 3.5 0 0 0 9 19Z"/>'),
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   people: svg('<circle cx="12" cy="8" r="3.2"/><path d="M6 20c0-3 2.7-5 6-5s6 2 6 5"/>'),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/>'),
+  image: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 3-3 3 3"/>'),
+  video: svg('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 11 5-3v8l-5-3Z"/>'),
+  link: svg('<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1"/>'),
 };
+
+/** Marque TOMATE : une tomate sobre, dessinée dans la couleur d'accent. */
+const LOGO = `<svg class="logo-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+  <path d="M16 9.4c-5.2 0-9.4 3.6-9.4 8.4 0 5 3.9 8.7 9.4 8.7s9.4-3.7 9.4-8.7c0-4.8-4.2-8.4-9.4-8.4Z" fill="currentColor"/>
+  <path d="M16 9.2c.3-2 1.6-3.5 3.7-4.1M16 9.2c-.3-2-1.6-3.5-3.7-4.1" stroke="var(--leaf)" stroke-width="2" stroke-linecap="round"/>
+  <path d="M16 9.2v-4.4" stroke="var(--leaf)" stroke-width="2" stroke-linecap="round"/>
+  <path d="M11.6 6.8c2.2.7 3.4 1.5 4.4 2.4 1-1 2.2-1.7 4.4-2.4" stroke="var(--leaf)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
 
 // ------------------------------------------------------------------ coquille
 
@@ -213,7 +231,7 @@ const NAV = [
   { id: 'feed', label: 'Accueil', icon: ICON.home, route: '#/feed' },
   { id: 'messages', label: 'Messages', icon: ICON.messages, route: '#/messages' },
   { id: 'network', label: 'Réseau', icon: ICON.network, route: '#/network' },
-  { id: 'communities', label: 'Communautés', icon: ICON.communities, route: '#/communities' },
+  { id: 'communities', label: 'Groupes', icon: ICON.communities, route: '#/communities' },
   { id: 'profile', label: 'Profil', icon: ICON.profile, route: '#/profile' },
 ];
 
@@ -242,9 +260,10 @@ function topbar({ title, back = null, actions = '' } = {}) {
     </header>`;
   }
   return `<header class="topbar">
-    <div class="brand">TOMATE</div>
-    <div class="row" style="gap:8px">
+    <div class="brand">${LOGO}<span class="brand-word">TOMATE</span></div>
+    <div class="row" style="gap:6px">
       ${statusChip()}
+      <button class="icon-btn" data-act="nav" data-route="#/search" aria-label="Rechercher">${ICON.search}</button>
       ${actions}
     </div>
   </header>`;
@@ -349,11 +368,15 @@ function feedView() {
     ${storiesBar()}
     <div class="card">
       <form data-form="publish" class="compose">
-        <label for="compose" class="muted small" style="font-weight:600">Partager quelque chose…</label>
-        <textarea id="compose" name="body" maxlength="${MAX_POST_LENGTH}" placeholder="Quoi de neuf ?" aria-label="Nouvelle publication"></textarea>
+        <label for="compose" class="composer-target">${ICON.people} Tout le monde</label>
+        <textarea id="compose" name="body" maxlength="${MAX_POST_LENGTH}" placeholder="Quoi de neuf ?" aria-label="Nouvelle publication">${esc(readDraft(null))}</textarea>
+        ${composerMediaPreview()}
         <div class="row-between">
-          <span data-counter="publish">0/${MAX_POST_LENGTH}</span>
-          <button class="icon-btn" type="submit" style="color:var(--primary)" aria-label="Publier">${ICON.send}</button>
+          <div class="composer-tools">
+            <label class="tool-btn" for="post-file">${ICON.image} Photo / vidéo<input id="post-file" type="file" accept="image/*,video/*" /></label>
+            <span class="tiny" data-counter="publish">0/${MAX_POST_LENGTH}</span>
+          </div>
+          <button class="btn btn-primary" type="submit">Publier</button>
         </div>
       </form>
     </div>
@@ -390,16 +413,24 @@ function weatherCard() {
 
 function postItem(post) {
   const mine = post.author_id === S.profile?.id;
+  // Before 0006 the feed has no community_name: fall back to the cached group list.
+  const communityName = post.community_id
+    ? post.community_name ?? S.communities.find((c) => c.id === post.community_id)?.name ?? 'Groupe'
+    : null;
   return `<article class="post">
     <span class="avatar">${initials(post.author_display_name || post.author_handle)}</span>
     <div class="grow">
-      <div class="row wrap" style="gap:8px">
+      <div class="post-head">
         <strong>${esc(post.author_display_name || post.author_handle || 'Anonyme')}</strong>
         <span class="post-meta">@${esc(post.author_handle ?? '')} · ${fmtDate(post.created_at)}</span>
+        ${post.community_id && communityName
+          ? `<button class="chip-community" data-act="open-community" data-id="${esc(post.community_id)}">${esc(communityName)}</button>`
+          : ''}
         ${post.pending ? '<span class="pending-label">En attente d\'envoi</span>' : ''}
         ${post.failed ? '<span class="pending-label" style="color:var(--danger)">Non envoyé</span>' : ''}
       </div>
-      <div class="post-body" data-body-post="${esc(post.id)}"></div>
+      ${post.body ? `<div class="post-body" data-body-post="${esc(post.id)}"></div>` : ''}
+      ${postMediaHtml(post)}
       <div class="post-actions">
         <button class="action ${post.reacted_by_me ? 'liked' : ''}" data-act="like" data-id="${esc(post.id)}" aria-pressed="${!!post.reacted_by_me}">
           ${ICON.heart}<span>${post.reaction_count ?? 0}</span>
@@ -775,27 +806,143 @@ async function deleteStory(id) {
   return true;
 }
 
-async function publishPost(body) {
+// ------------------------------------------------- brouillons et médias
+
+// Un brouillon survit à la fermeture de l'onglet : « publication préparée » ne doit pas
+// être une promesse vide. Clé distincte par communauté.
+const draftKey = (communityId) => (communityId ? `tomate:draft:community:${communityId}` : 'tomate:draft:feed');
+
+function readDraft(communityId) {
+  try {
+    return localStorage.getItem(draftKey(communityId)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function writeDraft(communityId, value) {
+  try {
+    if (String(value ?? '').trim()) localStorage.setItem(draftKey(communityId), value);
+    else localStorage.removeItem(draftKey(communityId));
+  } catch {
+    // Private mode can refuse storage: the draft is simply not kept.
+  }
+}
+
+const postMediaUrl = (path) =>
+  `${SUPABASE_URL}/storage/v1/object/public/posts/${String(path ?? '')
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')}`;
+
+// Mêmes règles que les stories : photo compressée à 1440 px, vidéo jusqu'à 25 Mo.
+const preparePostMedia = prepareStoryMedia;
+
+function composerMediaPreview() {
+  const media = S.postMedia;
+  if (!media) return '';
+  const preview = media.type === 'video'
+    ? `<video src="${esc(media.preview)}" muted playsinline preload="metadata"></video>`
+    : `<img src="${esc(media.preview)}" alt="Aperçu de la photo" />`;
+  return `<div class="media-strip" id="composer-media">${preview}
+    <div class="grow">${media.type === 'video' ? 'Vidéo prête à envoyer' : 'Photo compressée, prête à envoyer'}
+      <div class="tiny muted">${Math.max(1, Math.round(media.blob.size / 1024))} Ko · ${media.ext.toUpperCase()}</div>
+    </div>
+    <button class="remove" type="button" data-act="drop-media" aria-label="Retirer le média">${ICON.close}</button>
+  </div>`;
+}
+
+function postMediaHtml(post) {
+  if (!post.media_path) return '';
+  const url = postMediaUrl(post.media_path);
+  if (post.media_type === 'video') {
+    return `<video class="post-media video" src="${esc(url)}" controls playsinline preload="metadata"></video>`;
+  }
+  return `<img class="post-media" src="${esc(url)}" alt="Photo publiée par ${esc(post.author_display_name || post.author_handle || 'un membre')}" loading="lazy" />`;
+}
+
+async function uploadPostMedia(path, media) {
+  const session = await ensureRemoteSession();
+  if (!session) throw new Error('Connexion requise pour envoyer une photo ou une vidéo.');
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/posts/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': media.mime,
+      'x-upsert': 'false',
+    },
+    body: media.blob,
+  });
+  if (!response.ok) {
+    const hint = response.status === 400 || response.status === 404
+      ? 'Stockage photo/vidéo non activé : appliquez la migration 0006_social.sql.'
+      : `Envoi du média refusé (HTTP ${response.status}).`;
+    throw new Error(hint);
+  }
+  return path;
+}
+
+async function attachPostMedia(file) {
+  const media = await preparePostMedia(file);
+  if (!media) return;
+  S.postMedia = media;
+  render();
+}
+
+async function publishPost(body, { communityId = null, media = S.postMedia } = {}) {
   const text = body.trim();
-  if (!text) return toast("Écrivez d'abord un message.");
+  if (!text && !media) return toast("Écrivez un message ou ajoutez une photo.");
   if (text.length > MAX_POST_LENGTH) return toast('Message trop long.');
+
+  const id = crypto.randomUUID();
+  let mediaPath = null;
+  let mediaType = null;
+  if (media) {
+    if (!ONLINE()) return toast('Photo ou vidéo : connexion requise. Le texte, lui, part hors ligne.');
+    mediaPath = `${S.profile.id}/${id}.${media.ext}`;
+    mediaType = media.type;
+    await uploadPostMedia(mediaPath, media);
+  }
+
+  const community = communityId ? S.communities.find((c) => c.id === communityId) : null;
   const post = {
-    id: crypto.randomUUID(),
+    id,
     author_id: S.profile.id,
     author_handle: S.profile.handle,
     author_display_name: S.profile.display_name,
     body: text,
-    community_id: null,
-    visibility: 'Public',
+    community_id: communityId,
+    community_name: community?.name ?? null,
+    visibility: communityId ? 'Community' : 'Public',
     created_at: new Date().toISOString(),
     reaction_count: 0,
     comment_count: 0,
     reacted_by_me: false,
+    media_path: mediaPath,
+    media_type: mediaType,
     pending: true,
   };
+
+  const payload = {
+    id: post.id,
+    author_id: post.author_id,
+    body: text,
+    visibility: post.visibility,
+    community_id: communityId,
+  };
+  // The media columns only exist after 0006: a text post must keep working before it.
+  if (mediaPath) {
+    payload.media_path = mediaPath;
+    payload.media_type = mediaType;
+  }
+
   S.feed = [post, ...S.feed];
   await cacheSet('feed', S.feed);
-  await enqueue('post_insert', { id: post.id, author_id: post.author_id, body: text, visibility: 'Public' });
+  await enqueue('post_insert', payload);
+  writeDraft(communityId, '');
+  S.draft = '';
+  S.postMedia = null;
   render();
   await syncNow();
 }
@@ -1310,11 +1457,113 @@ async function loadStreaks() {
   }
 }
 
+// --------------------------------------------------------------- recherche
+
+function searchResult(result) {
+  const label = result.kind === 'person' ? 'Personne' : result.kind === 'community' ? 'Groupe' : 'Publication';
+  const action = result.kind === 'person'
+    ? `data-act="search-person" data-id="${esc(result.id)}" data-handle="${esc(result.handle ?? '')}" data-name="${esc(result.title ?? '')}"`
+    : result.kind === 'community'
+      ? `data-act="open-community" data-id="${esc(result.id)}"`
+      : `data-act="open-post" data-id="${esc(result.id)}"`;
+  return `<button class="search-result" ${action}>
+    <span class="avatar" style="width:40px;height:40px;border-radius:14px;font-size:13px">${initials(result.title)}</span>
+    <span class="grow">
+      <span style="display:block;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(result.title || '(sans titre)')}</span>
+      <span class="tiny muted">${esc(result.subtitle ?? '')}</span>
+    </span>
+    <span class="kind">${label}</span>
+  </button>`;
+}
+
+function searchView() {
+  const { q, results, busy, error } = S.search;
+  return shell(`
+    <form data-form="search" class="search-bar" role="search">
+      ${ICON.search}
+      <input id="search-q" name="q" value="${esc(q)}" placeholder="Personnes, groupes, publications" aria-label="Rechercher dans TOMATE" autocomplete="off" />
+      <button class="btn btn-primary" type="submit">Chercher</button>
+    </form>
+    ${error ? notice(error, 'error', true) : ''}
+    ${busy ? '<div class="card flat" style="margin-top:12px"><p class="muted small">Recherche en cours…</p></div>' : ''}
+    ${!busy && results.length > 0
+      ? `<div class="card" style="margin-top:12px;padding:6px 16px">${results.map(searchResult).join('')}</div>`
+      : ''}
+    ${!busy && q.length >= 2 && results.length === 0 && !error
+      ? `<div class="card" style="margin-top:12px">${emptyState('🔎', 'Aucun résultat.', 'Essayez un autre pseudo, un nom de groupe ou un mot de publication.')}</div>`
+      : ''}
+    ${q.length < 2
+      ? `<div class="card flat" style="margin-top:12px">${emptyState('🔎', 'Chercher dans TOMATE.', 'Pseudo, nom de groupe ou mot d’une publication. Hors ligne, la recherche se limite à ce qui est déjà sur cet appareil.')}</div>`
+      : ''}
+  `, { title: 'Rechercher', back: '#/feed' });
+}
+
+function localSearch(term) {
+  const needle = term.toLowerCase();
+  const people = S.profile && `${S.profile.handle} ${S.profile.display_name}`.toLowerCase().includes(needle)
+    ? [{ kind: 'person', id: S.profile.id, title: S.profile.display_name, subtitle: `@${S.profile.handle}`, handle: S.profile.handle }]
+    : [];
+  return [
+    ...people,
+    ...S.communities
+      .filter((c) => `${c.name} ${c.slug}`.toLowerCase().includes(needle))
+      .map((c) => ({ kind: 'community', id: c.id, title: c.name, subtitle: `${c.member_count ?? 0} membre(s) · ${c.visibility === 'Private' ? 'privé' : 'public'}` })),
+    ...S.feed
+      .filter((p) => (p.body ?? '').toLowerCase().includes(needle))
+      .slice(0, 12)
+      .map((p) => ({ kind: 'post', id: p.id, title: p.body?.slice(0, 90) || 'Média', subtitle: `@${p.author_handle ?? ''}` })),
+  ].slice(0, 30);
+}
+
+async function runSearch(term) {
+  const q = String(term ?? '').trim();
+  S.search.q = q;
+  S.search.error = null;
+  if (q.length < 2) {
+    S.search.results = [];
+    render();
+    return;
+  }
+  if (!ONLINE()) {
+    S.search.results = localSearch(q);
+    S.search.error = 'Hors ligne : résultats limités aux données déjà téléchargées sur cet appareil.';
+    render();
+    return;
+  }
+  S.search.busy = true;
+  render();
+  try {
+    // PostgREST uses `*` as its wildcard; strip characters that would break the filter.
+    const needle = q.replace(/[*,()%]/g, ' ').trim() || q;
+    const enc = encodeURIComponent(needle);
+    const [people, groups, posts] = await Promise.all([
+      rest('profiles', { query: `select=id,handle,display_name&or=(handle.ilike.*${enc}*,display_name.ilike.*${enc}*)&limit=8` }),
+      rest('communities', { query: `select=id,name,member_count,visibility&or=(name.ilike.*${enc}*,slug.ilike.*${enc}*)&limit=8` }),
+      rest('feed', { query: `select=id,body,author_handle,author_display_name&body=ilike.*${enc}*&limit=12` }),
+    ]);
+    S.search.results = [
+      ...(people ?? []).map((p) => ({ kind: 'person', id: p.id, title: p.display_name || p.handle, subtitle: `@${p.handle}`, handle: p.handle })),
+      ...(groups ?? []).map((c) => ({ kind: 'community', id: c.id, title: c.name, subtitle: `${c.member_count ?? 0} membre(s) · ${c.visibility === 'Private' ? 'privé' : 'public'}` })),
+      ...(posts ?? []).map((p) => ({ kind: 'post', id: p.id, title: p.body?.slice(0, 90) || 'Média', subtitle: `@${p.author_handle ?? ''}` })),
+    ];
+  } catch (error) {
+    S.search.error = humanError(error);
+    S.search.results = localSearch(q);
+  } finally {
+    S.search.busy = false;
+    render();
+  }
+}
+
 // -------------------------------------------------------------- communautés
 
 function communitiesView() {
   return shell(`
     ${S.lastError ? notice(S.lastError, 'error', true) : ''}
+    <button class="search-bar" style="width:100%;margin-bottom:14px" data-act="nav" data-route="#/search">
+      ${ICON.search}
+      <span class="grow" style="text-align:left;color:var(--muted);padding:10px 0">Rechercher un groupe, une personne…</span>
+    </button>
     <div class="section-title"><h2>Communautés</h2>
       <button class="btn btn-soft" data-act="create-community">${ICON.plus} Créer</button>
     </div>
@@ -1358,6 +1607,8 @@ async function loadCommunities({ refresh = false } = {}) {
   } catch (error) {
     const cachedMemberships = await cacheGet('memberships');
     if (Array.isArray(cachedMemberships)) S.memberships = new Set(cachedMemberships);
+    const cachedCommunities = await cacheGet('communities');
+    if (Array.isArray(cachedCommunities)) S.communities = cachedCommunities;
     S.lastError = humanError(error);
   }
 }
@@ -1389,8 +1640,9 @@ async function createCommunity() {
   S.memberships.add(community.id);
   await cacheSet('communities', S.communities);
   await cacheSet('memberships', [...S.memberships]);
+  // Le trigger `tomate_community_owner_membership` ajoute déjà le créateur en Owner :
+  // une seconde insertion « Owner » était refusée par la RLS (403) et salissait la file.
   await enqueue('community_create', { id: community.id, name: community.name, slug: community.slug, description: '', owner_id: S.profile.id, visibility: 'Public' });
-  await enqueue('community_join', { community_id: community.id, user_id: S.profile.id, role: 'Owner', status: 'Active' });
   render();
   await syncNow();
 }
@@ -1398,37 +1650,113 @@ async function createCommunity() {
 async function joinCommunity(id) {
   const community = S.communities.find((c) => c.id === id);
   if (!community) return;
-  S.memberships.add(id);
-  community.member_count = (community.member_count ?? 0) + 1;
+  // Public → membre actif. Privé → demande en attente, jamais une adhésion silencieuse.
+  const pending = community.visibility === 'Private';
+  if (pending) {
+    community.joinStatus = 'Pending';
+  } else {
+    S.memberships.add(id);
+    community.member_count = (community.member_count ?? 0) + 1;
+  }
   await cacheSet('communities', S.communities);
   await cacheSet('memberships', [...S.memberships]);
-  await enqueue('community_join', { community_id: id, user_id: S.profile.id, role: 'Member', status: 'Active' });
+  await enqueue('community_join', {
+    community_id: id,
+    user_id: S.profile.id,
+    role: 'Member',
+    status: pending ? 'Pending' : 'Active',
+  });
   render();
   await syncNow();
+  toast(pending ? 'Demande envoyée : un modérateur doit l’accepter.' : 'Vous avez rejoint la communauté.');
+}
+
+async function loadCommunity(id) {
+  if (!ONLINE()) return;
+  try {
+    await ensureRemoteSession();
+    const rows = await rest('community_members', {
+      query: `select=user_id,role,status,profile:profiles(handle,display_name)&community_id=eq.${id}&order=role.asc&limit=60`,
+    });
+    S.communityMembers[id] = rows;
+    const fresh = await rest('communities', { query: `select=id,member_count,description&id=eq.${id}` });
+    const row = fresh?.[0];
+    const community = S.communities.find((c) => c.id === id);
+    if (row && community) {
+      community.member_count = row.member_count;
+      community.description = row.description ?? community.description;
+      await cacheSet('communities', S.communities);
+    }
+    render();
+  } catch (error) {
+    // The cached community and posts remain usable; the member list simply stays empty.
+    S.lastError = ONLINE() ? humanError(error) : null;
+  }
 }
 
 function communityView() {
   const community = S.communities.find((c) => c.id === S.param);
   if (!community) {
-    return shell(`<div class="card">${emptyState('🌍', 'Communauté introuvable en cache.', 'Revenez à la liste et actualisez.')}</div>`, { title: 'Communauté', back: '#/communities' });
+    return shell(`<div class="card">${emptyState('🌍', 'Communauté introuvable en cache.', 'Ouvrez-la depuis la liste ou demandez un lien d’invitation.')}</div>`, { title: 'Communauté', back: '#/communities' });
   }
+  const member = S.memberships.has(community.id);
   const posts = S.feed.filter((p) => p.community_id === community.id);
+  const members = S.communityMembers[community.id] ?? [];
+  const pending = community.joinStatus === 'Pending';
   return shell(`
-    <div class="card">
-      <div class="row"><span class="avatar lg">${initials(community.name)}</span>
-        <div class="grow"><h2>${esc(community.name)}</h2>
-        <div class="small muted">${community.member_count ?? 0} membre(s) · ${esc(community.visibility)}</div></div></div>
-      <p class="muted">${esc(community.description || 'Pas de description.')}</p>
-      <div class="pill-list">
-        <span class="badge">slug : ${esc(community.slug)}</span>
-        ${S.memberships.has(community.id) ? '<span class="badge ok">Membre</span>' : `<button class="btn btn-soft" data-act="join-community" data-id="${esc(community.id)}">Rejoindre</button>`}
+    ${S.lastError ? notice(S.lastError, 'error', true) : ''}
+    <div class="community-hero">
+      <span class="avatar lg">${initials(community.name)}</span>
+      <div class="grow">
+        <h2>${esc(community.name)}</h2>
+        <div class="small muted">${community.member_count ?? 0} membre(s) · ${community.visibility === 'Private' ? 'privé' : 'public'}</div>
+        <div class="pill-list" style="margin-top:9px">
+          ${member
+            ? '<span class="badge ok">Membre</span>'
+            : pending
+              ? '<span class="badge warn">Demande envoyée</span>'
+              : `<button class="btn btn-primary" data-act="join-community" data-id="${esc(community.id)}">Rejoindre</button>`}
+          <button class="btn btn-soft" data-act="copy-invite" data-id="${esc(community.id)}">${ICON.link} Inviter</button>
+        </div>
       </div>
     </div>
-    <div class="section-title"><h2>Publications</h2></div>
-    <div class="card" style="padding:4px 16px">
-      ${posts.length === 0 ? emptyState('📝', 'Aucune publication ici.', 'Les publications de communauté arrivent depuis l’application Android ou la file d’attente.') : posts.map(postItem).join('')}
+    <p class="muted" style="margin:14px 4px 0">${esc(community.description || 'Pas encore de description.')}</p>
+
+    ${member
+      ? `<div class="card" style="margin-top:12px">
+          <form data-form="publish-community" data-community-id="${esc(community.id)}" class="compose">
+            <label for="compose-${esc(community.id)}" class="composer-target">${ICON.communities} Dans ${esc(community.name)}</label>
+            <textarea id="compose-${esc(community.id)}" name="body" maxlength="${MAX_POST_LENGTH}" placeholder="Écrire au groupe…">${esc(readDraft(community.id))}</textarea>
+            <div class="row-between">
+              <span class="tiny" data-counter="community">0/${MAX_POST_LENGTH}</span>
+              <button class="btn btn-primary" type="submit">Publier</button>
+            </div>
+          </form>
+        </div>`
+      : `<div class="card flat" style="margin-top:12px">${emptyState('✍️', 'Rejoignez la communauté pour publier.', 'La lecture du groupe reste possible ; l’écriture demande l’adhésion.')}</div>`}
+
+    <div class="section-title"><h2>Publications</h2>
+      <button class="icon-btn" data-act="refresh" aria-label="Actualiser">${ICON.refresh}</button>
     </div>
-  `, { title: 'Communauté', back: '#/communities' });
+    <div class="card" style="padding:6px 16px">
+      ${posts.length === 0
+        ? emptyState('📝', 'Aucune publication ici.', 'Soyez le premier à écrire dans ce groupe.')
+        : posts.map(postItem).join('')}
+    </div>
+
+    ${members.length > 0
+      ? `<div class="section-title"><h2>Membres (${members.length})</h2></div>
+         <div class="card" style="padding:10px 18px">
+           ${members.map((m) => `<div class="member-row">
+             <span class="avatar" style="width:36px;height:36px;font-size:13px;border-radius:12px">${initials(m.profile?.display_name || m.profile?.handle || '?')}</span>
+             <div class="grow"><div style="font-weight:600">${esc(m.profile?.display_name || m.profile?.handle || 'Membre')}</div>
+             <div class="tiny muted">@${esc(m.profile?.handle ?? '')}</div></div>
+             <span class="member-role ${m.role === 'Owner' ? 'owner' : ''}">${esc(m.role)}</span>
+             ${m.status === 'Pending' ? '<span class="badge warn">en attente</span>' : ''}
+           </div>`).join('')}
+         </div>`
+      : ''}
+  `, { title: community.name, back: '#/communities' });
 }
 
 // ------------------------------------------------------------------- réseau
@@ -1876,6 +2204,10 @@ async function navigate() {
       break;
     case 'community':
       render();
+      await loadCommunity(S.param);
+      break;
+    case 'search':
+      render();
       break;
     case 'weather':
       render();
@@ -1905,6 +2237,7 @@ function view() {
     case 'chat': return chatView();
     case 'communities': return communitiesView();
     case 'community': return communityView();
+    case 'search': return searchView();
     case 'network': return networkView();
     case 'weather': return weatherView();
     case 'profile': return profileView();
@@ -1915,7 +2248,7 @@ function view() {
 
 function render() {
   if (S.booting) {
-    app.innerHTML = '<div class="boot"><div class="boot-logo">TOMATE</div><p class="muted">Chargement…</p></div>';
+    app.innerHTML = `<div class="boot"><div class="boot-logo">${LOGO}<span>TOMATE</span></div><p class="muted">Chargement…</p></div>`;
     return;
   }
   if (!S.profile) {
@@ -2014,6 +2347,27 @@ document.addEventListener('click', async (event) => {
       case 'refresh-communities':
         await loadCommunities({ refresh: true });
         render();
+        break;
+      case 'copy-invite': {
+        const url = `${location.origin}${location.pathname}#/community/${trigger.dataset.id}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          toast('Lien d’invitation copié.');
+        } catch {
+          toast(url);
+        }
+        break;
+      }
+      case 'drop-media':
+        S.postMedia = null;
+        render();
+        break;
+      case 'search-person':
+        await createConversationWith({
+          id: trigger.dataset.id,
+          handle: trigger.dataset.handle ?? '',
+          name: trigger.dataset.name ?? '',
+        });
         break;
       case 'open-post':
         location.hash = `#/post/${trigger.dataset.id}`;
@@ -2128,6 +2482,28 @@ document.addEventListener('input', (event) => {
   const form = field.closest('form');
   const counter = form?.querySelector('[data-counter]');
   if (counter) counter.textContent = `${field.value.length}/${field.maxLength}`;
+  // Drafts survive a reload, a tab close and a failed send.
+  if (form?.dataset.form === 'publish') {
+    S.draft = field.value;
+    writeDraft(null, field.value);
+  }
+  if (form?.dataset.form === 'publish-community') {
+    const cid = form.dataset.communityId;
+    S.draftCommunity[cid] = field.value;
+    writeDraft(cid, field.value);
+  }
+});
+
+document.addEventListener('change', async (event) => {
+  if (!event.target.matches('#post-file')) return;
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    await attachPostMedia(file);
+  } catch (error) {
+    S.lastError = humanError(error);
+    render();
+  }
 });
 
 document.addEventListener('submit', async (event) => {
@@ -2146,8 +2522,18 @@ document.addEventListener('submit', async (event) => {
         });
         break;
       case 'publish':
-        await publishPost(String(data.get('body') ?? ''));
+        await publishPost(String(data.get('body') ?? ''), { media: S.postMedia });
         form.reset();
+        break;
+      case 'publish-community':
+        await publishPost(String(data.get('body') ?? ''), {
+          communityId: form.dataset.communityId,
+          media: null,
+        });
+        form.reset();
+        break;
+      case 'search':
+        await runSearch(String(data.get('q') ?? ''));
         break;
       case 'comment':
         await addComment(form.dataset.postId, String(data.get('body') ?? ''));
@@ -2222,6 +2608,8 @@ async function boot() {
     if (Array.isArray(cachedStories)) S.stories = cachedStories.filter(storyAlive);
     const cachedMemberships = await cacheGet('memberships');
     if (Array.isArray(cachedMemberships)) S.memberships = new Set(cachedMemberships);
+    const cachedCommunities = await cacheGet('communities');
+    if (Array.isArray(cachedCommunities)) S.communities = cachedCommunities;
     await refreshCounts();
   } catch (error) {
     S.lastError = humanError(error);

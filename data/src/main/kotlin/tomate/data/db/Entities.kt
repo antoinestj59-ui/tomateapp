@@ -39,6 +39,8 @@ data class PostEntity(
     val authorHandle: String,
     val authorDisplayName: String,
     val body: String,
+    val mediaPath: String? = null,
+    val mediaType: String? = null,
     val communityId: String?,
     val visibility: Visibility,
     val createdAt: Long,

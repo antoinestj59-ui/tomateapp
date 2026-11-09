@@ -43,6 +43,11 @@ Client web de TOMATE : installable, hors ligne après le premier chargement, bra
 | Appels audio/vidéo | **absents** |
 | Stories | **testées en ligne** : création **201**, visible par un autre compte, vue enregistrée, story écrite hors ligne envoyée à la reconnexion, suppression par l'auteur. Bandeau, visionneuse 24 h, composeur, **photo/vidéo** (nécessite `0005_media_reseau.sql`). |
 | Ajout par QR | QR personnel généré, scan caméra si `BarcodeDetector`, lien collé, conversation créée même hors ligne. |
+| Publications photo/vidéo | code livré, upload vers le bucket `posts` avant l'écriture (migration `0006_social.sql` requise) ; refus honnête et média conservé tant que le bucket manque. |
+| Publication dans un groupe | composeur dans la page du groupe, `visibility=Community`, `community_id` vérifié côté serveur ; message vu par le propriétaire. |
+| Découverte des groupes | liste des groupes publics, lien d'invitation copiable, liste des membres (rôles) une fois `0006` appliquée. |
+| Recherche globale | personnes, groupes et publications via PostgREST ; hors ligne, recherche limitée au cache et annoncée. |
+| Brouillons | fil et groupes, conservés dans `localStorage` après rechargement. |
 | Flammes 🔥 | Jours consécutifs où les deux ont écrit, calculés depuis les messages, affichés hors ligne. |
 | Événements, cartes hors ligne | **non portés** (itérations futures) |
 

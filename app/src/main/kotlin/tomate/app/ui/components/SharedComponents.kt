@@ -1,5 +1,11 @@
 package tomate.app.ui.components
 
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,18 +19,31 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.ModeComment
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Date
 import java.util.Locale
 import tomate.core.designsystem.components.MetricPill
@@ -40,6 +59,40 @@ import tomate.core.model.Visibility
 import tomate.core.model.label
 
 private val timeFormat = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+
+/** Public URL of a post attachment, built from the storage path kept in the database. */
+fun postMediaPublicUrl(path: String?): String? {
+    if (path.isNullOrBlank()) return null
+    val encoded = path.split('/').joinToString("/") {
+        java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+    }
+    return "${tomate.data.backend.SupabaseConfig.url}/storage/v1/object/public/posts/$encoded"
+}
+
+/** Minimal remote image loader: no image library is bundled, bytes are decoded off the main thread. */
+@Composable
+fun TomateRemoteImage(
+    url: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+) {
+    var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(url) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                java.net.URL(url).openStream().use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+            }.getOrNull()
+        }
+    }
+    bitmap?.let {
+        Image(
+            bitmap = it,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
 
 fun Long.formatTimestamp(): String =
     if (this <= 0L) "—" else timeFormat.format(Date(this))
@@ -74,8 +127,43 @@ fun PostCard(
                     MetricPill(text = post.visibility.label)
                 }
             }
-            Spacer(Modifier.height(TomateSpacing.m))
-            Text(text = post.body, style = MaterialTheme.typography.bodyLarge)
+            if (post.body.isNotBlank()) {
+                Spacer(Modifier.height(TomateSpacing.m))
+                Text(text = post.body, style = MaterialTheme.typography.bodyLarge)
+            }
+
+            postMediaPublicUrl(post.mediaPath)?.let { url ->
+                Spacer(Modifier.height(TomateSpacing.m))
+                if (post.mediaType == "video") {
+                    val context = LocalContext.current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.large)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable {
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
+                            }
+                            .padding(TomateSpacing.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(TomateSpacing.s))
+                        Text(text = "Vidéo — ouvrir le lecteur", style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    TomateRemoteImage(
+                        url = url,
+                        contentDescription = "Photo de ${post.authorDisplayName.ifBlank { post.authorHandle }}",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp)
+                            .clip(MaterialTheme.shapes.large),
+                    )
+                }
+            }
 
             Spacer(Modifier.height(TomateSpacing.s))
             Row(verticalAlignment = Alignment.CenterVertically) {

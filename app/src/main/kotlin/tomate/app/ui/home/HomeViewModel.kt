@@ -19,7 +19,15 @@ import tomate.data.repo.StoryRepository
 
 class HomeViewModel(private val container: TomateContainer) : ViewModel() {
 
-    data class Composer(val text: String = "", val posting: Boolean = false)
+    data class Composer(
+        val text: String = "",
+        val posting: Boolean = false,
+        val media: ByteArray? = null,
+        val mediaType: String? = null,
+        val mimeType: String? = null,
+        val extension: String = "jpg",
+        val mediaLabel: String? = null,
+    )
 
     data class StoryDraft(
         val text: String = "",
@@ -39,6 +47,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val refreshing: Boolean,
         val composerText: String,
         val posting: Boolean,
+        val composerMediaLabel: String? = null,
         val error: AppError?,
         val network: NetworkStatus,
         val pendingOperations: Int,
@@ -53,6 +62,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val refreshing: Boolean = false,
         val composerText: String = "",
         val posting: Boolean = false,
+        val composerMediaLabel: String? = null,
         val error: AppError? = null,
         val network: NetworkStatus = NetworkStatus.Checking,
         val pendingOperations: Int = 0,
@@ -81,6 +91,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             refreshing = loadingPair.second,
             composerText = composerPair.first.text,
             posting = composerPair.first.posting,
+            composerMediaLabel = composerPair.first.mediaLabel,
             error = composerPair.second,
             network = networkPair.first,
             pendingOperations = networkPair.second,
@@ -103,6 +114,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             refreshing = b.refreshing,
             composerText = b.composerText,
             posting = b.posting,
+            composerMediaLabel = b.composerMediaLabel,
             error = b.error,
             network = b.network,
             pendingOperations = b.pendingOperations,
@@ -145,12 +157,43 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         }
     }
 
+    fun onPostMediaSelected(
+        bytes: ByteArray,
+        mediaType: String,
+        mimeType: String,
+        extension: String,
+        label: String,
+    ) {
+        composer.value = composer.value.copy(
+            media = bytes,
+            mediaType = mediaType,
+            mimeType = mimeType,
+            extension = extension,
+            mediaLabel = label,
+        )
+    }
+
+    fun clearPostMedia() {
+        composer.value = composer.value.copy(
+            media = null,
+            mediaType = null,
+            mimeType = null,
+            mediaLabel = null,
+        )
+    }
+
     fun publish() {
-        val text = composer.value.text
-        if (text.isBlank()) return
+        val draft = composer.value
+        if (draft.text.isBlank() && draft.media == null) return
         viewModelScope.launch {
-            composer.value = composer.value.copy(posting = true)
-            val result = container.feed.createPost(text)
+            composer.value = draft.copy(posting = true)
+            val result = container.feed.createPost(
+                body = draft.text,
+                media = draft.media,
+                mediaType = draft.mediaType,
+                mimeType = draft.mimeType,
+                extension = draft.extension,
+            )
             when (result) {
                 is Outcome.Success -> composer.value = Composer()
                 is Outcome.Failure -> {

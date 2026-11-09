@@ -49,6 +49,9 @@ data class Post(
     val authorHandle: String = "",
     val authorDisplayName: String = "",
     val body: String,
+    /** Storage path of a photo or a video, relative to the `posts` bucket. */
+    val mediaPath: String? = null,
+    val mediaType: String? = null,
     val communityId: String? = null,
     val visibility: Visibility = Visibility.Public,
     val createdAt: Long = 0L,

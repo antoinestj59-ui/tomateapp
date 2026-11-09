@@ -31,7 +31,7 @@ Deux façons de procéder, au choix.
 
 Ouvrir [`supabase/ALL_IN_ONE.sql`](../supabase/ALL_IN_ONE.sql), cliquer sur **Raw** (ou
 « Copier le fichier brut »), **tout** sélectionner, puis **Run** une seule fois. Ce fichier
-contient les quatre migrations dans le bon ordre, séparées par des lignes de commentaire.
+contient les six migrations dans le bon ordre, séparées par des lignes de commentaire.
 
 ### B. Fichier par fichier
 
@@ -46,6 +46,11 @@ ordre**, en collant l'intégralité du contenu de chaque fichier (jamais son che
    — bucket d'avatars et politiques de stockage.
 4. [`supabase/migrations/0004_stories.sql`](../supabase/migrations/0004_stories.sql)
    — stories de 24 h : tables `stories` / `story_views`, politiques RLS, vue `stories_feed`.
+5. [`supabase/migrations/0005_media_reseau.sql`](../supabase/migrations/0005_media_reseau.sql)
+   — photos et vidéos dans les stories, bucket `stories`, fil de stories étendu.
+6. [`supabase/migrations/0006_social.sql`](../supabase/migrations/0006_social.sql)
+   — photos et vidéos dans les publications, bucket `posts`, fil étendu (média, communauté),
+   liste des membres d'un groupe public, adhésion honnête (public = actif, privé = demande).
 
 Dans l'éditeur GitHub, le bouton **Copier** en haut à droite du fichier copie le contenu
 exact ; c'est ce contenu qu'il faut coller.
@@ -192,3 +197,29 @@ Points importants :
 curl -s "$SUPABASE_URL/rest/v1/stories_feed?select=id,media_path&limit=1" \
   -H "apikey: $KEY" -H "Authorization: Bearer $TOKEN"
 ```
+
+## Migration 0006 — publications avec média et communautés
+
+`supabase/migrations/0006_social.sql` :
+
+1. colonnes `media_path` / `media_type` sur `posts` (texte facultatif si un média est présent) ;
+2. bucket `posts` (26 Mo, images et vidéos), lecture publique, écriture limitée à
+   `<user_id>/…`, et contrôle que le chemin commence par l'identifiant de l'auteur ;
+3. vue `feed` étendue : `media_path`, `media_type`, `author_avatar_path`, `community_name`,
+   `community_slug` (ajoutées **en fin** de liste, contrainte de `CREATE OR REPLACE VIEW`) ;
+4. `community_members` : liste des membres lisible pour un groupe **public** ;
+5. adhésion honnête : public → statut `Active`, privé → `Pending`. Avant, n'importe qui
+   pouvait s'ajouter `Active` dans un groupe privé.
+
+Vérification après exécution :
+
+```sql
+-- colonnes présentes
+select column_name from information_schema.columns
+ where table_name = 'posts' and column_name like 'media%';
+-- bucket créé
+select id, public, file_size_limit from storage.buckets where id = 'posts';
+```
+
+Puis, dans l'application : publier une photo depuis le fil, la voir apparaître chez un second
+compte, et vérifier la liste des membres d'un groupe public.

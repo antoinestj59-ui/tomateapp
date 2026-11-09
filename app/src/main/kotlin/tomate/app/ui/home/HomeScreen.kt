@@ -78,6 +78,7 @@ import tomate.core.designsystem.components.TomateInlineNotice
 import tomate.core.designsystem.components.TomateLoadingState
 import tomate.core.designsystem.components.TomateNetworkBadge
 import tomate.core.designsystem.components.TomateTextField
+import tomate.core.designsystem.components.TomateTonalButton
 import tomate.core.designsystem.theme.TomateSpacing
 import tomate.core.model.NetworkStatus
 import tomate.core.model.Story
@@ -95,6 +96,55 @@ fun HomeScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var openStoryId by remember { mutableStateOf<String?>(null) }
     val openStory = state.stories.firstOrNull { it.id == openStoryId }
+    val context = LocalContext.current
+    var postMediaError by remember { mutableStateOf<String?>(null) }
+
+    // A post attachment is uploaded before the row is written; offline it is refused honestly.
+    val postPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+        val isVideo = mime.startsWith("video/")
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null) {
+            postMediaError = "Lecture du fichier impossible."
+            return@rememberLauncherForActivityResult
+        }
+        if (isVideo) {
+            if (bytes.size > 25 * 1024 * 1024) {
+                postMediaError = "Vidéo trop lourde : 25 Mo maximum."
+                return@rememberLauncherForActivityResult
+            }
+            val extension = when {
+                mime.contains("webm") -> "webm"
+                mime.contains("quicktime") -> "mov"
+                else -> "mp4"
+            }
+            postMediaError = null
+            viewModel.onPostMediaSelected(
+                bytes = bytes,
+                mediaType = "video",
+                mimeType = mime,
+                extension = extension,
+                label = "Vidéo prête (${bytes.size / (1024 * 1024)} Mo)",
+            )
+        } else {
+            val compressed = compressStoryImage(bytes)
+            if (compressed == null) {
+                postMediaError = "Photo illisible."
+                return@rememberLauncherForActivityResult
+            }
+            postMediaError = null
+            viewModel.onPostMediaSelected(
+                bytes = compressed,
+                mediaType = "image",
+                mimeType = "image/jpeg",
+                extension = "jpg",
+                label = "Photo prête (${compressed.size / 1024} Ko)",
+            )
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
@@ -149,6 +199,27 @@ fun HomeScreen(
                     minLines = 2,
                     maxLines = 5,
                 )
+                state.composerMediaLabel?.let { label ->
+                    Spacer(Modifier.height(TomateSpacing.xs))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = viewModel::clearPostMedia) {
+                            Icon(Icons.Filled.Close, contentDescription = "Retirer le média")
+                        }
+                    }
+                }
+                postMediaError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Spacer(Modifier.height(TomateSpacing.s))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -157,9 +228,21 @@ fun HomeScreen(
                 ) {
                     MetricPill(text = "${state.composerText.length}/2000")
                     Spacer(Modifier.width(TomateSpacing.xs))
+                    TomateTonalButton(
+                        text = "Photo",
+                        onClick = { postPicker.launch("image/*") },
+                        enabled = !state.posting,
+                    )
+                    Spacer(Modifier.width(TomateSpacing.xs))
+                    TomateTonalButton(
+                        text = "Vidéo",
+                        onClick = { postPicker.launch("video/*") },
+                        enabled = !state.posting,
+                    )
+                    Spacer(Modifier.weight(1f))
                     IconButton(
                         onClick = viewModel::publish,
-                        enabled = state.composerText.isNotBlank() && !state.posting,
+                        enabled = (state.composerText.isNotBlank() || state.composerMediaLabel != null) && !state.posting,
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Publier")
                     }

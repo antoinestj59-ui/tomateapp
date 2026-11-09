@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.1.5
+# STATUS — TOMATE 0.1.6
 
 Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.5-debug.apk` — 23 Mo, `versionCode 6` |
+| APK | `artifacts/tomate-0.1.6-debug.apk` — 23 Mo, `versionCode 7` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -20,7 +20,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 |---|---|
 | Code | `web/` (sans build), `sites.web.json` |
 | Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
-| Version | `0.1.5-web` |
+| Version | `0.1.6-web` |
 | Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
 | Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
 | Messagerie | message PWA → second compte **HTTP 201 vérifié**, réponse → PWA affichée |
@@ -83,6 +83,26 @@ Android : Room v2 (migration 1→2), `StoryRepository`, kinds `story_insert` / `
 | Scanner caméra | **PWA uniquement** (API `BarcodeDetector`) ; non testé ici : le navigateur cloud n'a pas de caméra. Android : QR affiché + code collé, pas de scan caméra. |
 | Chiffrement de bout en bout | **non implémenté** — étude et plan dans [`docs/08_RESEAU_ET_CHIFFREMENT.md`](docs/08_RESEAU_ET_CHIFFREMENT.md). |
 
+## 2 quater. Itération 0.1.6 — vérifié le 9 novembre 2026
+
+| Fonction | Preuve réelle |
+|---|---|
+| Groupe : publication depuis la PWA | **oui** : composeur dans la page du groupe, message envoyé, `feed` serveur renvoie `community_id` + `visibility=Community`, file d'attente à 0 |
+| Groupe : découverte depuis un autre appareil | **oui, par API** : compte A crée `Jardin test` (201), compte B le voit, le rejoint (201) et publie dedans (201) ; A lit le message |
+| Groupe : adhésion du créateur | **corrigée** : la PWA n'envoie plus une seconde adhésion `Owner` (403) ; le trigger serveur fait le travail |
+| Groupe : liste des membres | affichée avec rôle (propriétaire marqué) et statut |
+| Foule : lien d'invitation | bouton « Inviter » qui copie `…/#/community/<id>` |
+| Publication avec photo/vidéo | **code PWA + Android**, envoi **refusé proprement** tant que `0006_social.sql` n'est pas appliquée : « Stockage photo/vidéo non activé… », aucune publication créée, média conservé pour réessayer |
+| Brouillon de publication | **vérifié** : texte écrit, page rechargée, brouillon restauré (localStorage) |
+| Recherche globale | **vérifiée** : « Jardin » → 2 groupes ; « groupe » → la publication ; « web_qr1 » → la personne, et un clic crée la conversation (3 opérations synchronisées) |
+| Recherche hors ligne | limitée au cache, et **annoncée comme telle** |
+| Nouvelle interface | palette tomate, marque SVG, navigation flottante à 5 entrées, cartes de publication avec média, thème sombre, `prefers-reduced-motion`, focus visible |
+| Android | `:app:assembleDebug` **BUILD SUCCESSFUL**, tests unitaires core/data/net **PASS**, Room **v4** (migration 3→4, `4.json` généré), publication avec photo/vidéo compilée |
+
+Non vérifié dans cette itération : l'envoi réel d'une photo de story ou de publication (migrations
+`0005`/`0006` à exécuter), l'upload Android (aucun appareil), l'adhésion à un groupe privé
+(UI d'approbation absente), le scan caméra Android.
+
 ## 3. Correctifs de cette itération
 
 | Bug constaté | Cause | Correction |
@@ -115,7 +135,9 @@ météo, file d'attente, page de permissions, thème, installation (manifeste + 
 ### Absent — déclaré absent
 
 Chiffrement de bout en bout, récupération de compte, suppression de compte serveur, événements,
-cartes hors ligne, appels, notifications push, mesh navigateur.
+cartes hors ligne, appels, notifications push, mesh navigateur, médias dans les messages,
+groupes de discussion, modération et administration. Le détail par fonction est dans
+[`docs/09_MATRICE_FONCTIONNALITES.md`](docs/09_MATRICE_FONCTIONNALITES.md).
 
 ## 5. Ce qui n'a pas pu être testé ici
 

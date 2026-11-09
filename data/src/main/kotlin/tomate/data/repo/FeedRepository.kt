@@ -94,9 +94,13 @@ class FeedRepository(
         body: String,
         communityId: String? = null,
         visibility: Visibility = Visibility.Public,
+        media: ByteArray? = null,
+        mediaType: String? = null,
+        mimeType: String? = null,
+        extension: String = "jpg",
     ): Outcome<Post> {
         val trimmed = body.trim()
-        if (trimmed.isEmpty()) {
+        if (trimmed.isEmpty() && media == null) {
             return Outcome.Failure(AppError.Validation("empty_post", "Le message est vide."))
         }
         if (trimmed.length > MAX_POST_LENGTH) {
@@ -110,12 +114,30 @@ class FeedRepository(
         val profile = profileDao.byId(userId)
         val now = clock()
         val postId = UUID.randomUUID().toString()
+
+        // The bytes are uploaded before the row: a row pointing at a missing object would show a
+        // broken post to everyone, and an outbox entry cannot replay bytes later.
+        var mediaPath: String? = null
+        if (media != null) {
+            val path = "$userId/$postId.$extension"
+            when (val uploaded = api.uploadObject("posts", path, media, mimeType ?: "image/jpeg")) {
+                is Outcome.Failure -> return Outcome.Failure(
+                    AppError.Unknown(
+                        "Envoi du média impossible : connexion requise (stockage `posts` de la migration 0006).",
+                    ),
+                )
+                is Outcome.Success -> mediaPath = path
+            }
+        }
+
         val entity = PostEntity(
             id = postId,
             authorId = userId,
             authorHandle = profile?.handle ?: "",
             authorDisplayName = profile?.displayName ?: "",
             body = trimmed,
+            mediaPath = mediaPath,
+            mediaType = if (mediaPath != null) mediaType else null,
             communityId = communityId,
             visibility = visibility,
             createdAt = now,
@@ -132,6 +154,8 @@ class FeedRepository(
             id = postId,
             authorId = userId,
             body = trimmed,
+            mediaPath = mediaPath,
+            mediaType = if (mediaPath != null) mediaType else null,
             communityId = communityId,
             visibility = visibility.name,
         )
@@ -150,6 +174,14 @@ class FeedRepository(
                 Outcome.Failure(remote.error)
             }
         }
+    }
+
+    fun mediaUrl(path: String?): String? {
+        if (path.isNullOrBlank()) return null
+        val encoded = path.split('/').joinToString("/") {
+            java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+        }
+        return "${tomate.data.backend.SupabaseConfig.url}/storage/v1/object/public/posts/$encoded"
     }
 
     suspend fun deletePost(postId: String): Outcome<Unit> {
