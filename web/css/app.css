@@ -1025,3 +1025,44 @@ dialog.story-dialog {
 }
 
 .avatar.sm { width: 34px; height: 34px; font-size: 13px; border-radius: 12px; }
+
+/* Sélecteur de contacts (nouvelle conversation) */
+.contact-dialog { width: min(94vw, 460px); }
+.contact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(46vh, 340px);
+  overflow-y: auto;
+  margin-top: 10px;
+  padding-right: 2px;
+}
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.contact-row:hover { background: var(--surface-2); }
+.contact-row.on { background: var(--primary-soft); }
+.contact-row .contact-meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.contact-row .contact-meta strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-check { width: 20px; text-align: center; color: var(--primary); font-weight: 700; }
+
+/* Actions de conversation */
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.chat-actions .btn-sm { padding: 7px 12px; font-size: 13px; }
+.danger-text { color: var(--danger) !important; }

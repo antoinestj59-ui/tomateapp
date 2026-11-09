@@ -43,6 +43,16 @@ data class Profile(
     val pendingSync: Boolean = false,
 )
 
+/**
+ * A person returned by the contact picker. It is always a real server profile: the picker never
+ * fabricates a suggestion, and the id is what gets written to `conversation_members`.
+ */
+data class ContactCandidate(
+    val id: String,
+    val handle: String,
+    val displayName: String,
+)
+
 data class Post(
     val id: String,
     val authorId: String,

@@ -199,6 +199,120 @@ function promptDialog({ title, label, placeholder, value = '', type = 'text' }) 
   });
 }
 
+/**
+ * Participant picker. Rows come from the `profiles` table, so a suggestion always exists on the
+ * server; nothing is fabricated locally. Returns the chosen profiles, or null when cancelled.
+ */
+function contactPickerDialog({ title = 'Nouvelle conversation' } = {}) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'contact-dialog';
+    dialog.innerHTML = `
+      <h2>${esc(title)}</h2>
+      <p class="tiny muted" style="margin-bottom:12px">Choisissez une ou plusieurs personnes de ce serveur. Aucun contact n'est inventé.</p>
+      <div class="field">
+        <label for="contact-search">Rechercher</label>
+        <input class="input" id="contact-search" placeholder="Pseudo ou nom" autocomplete="off" enterkeyhint="search" />
+      </div>
+      <div class="contact-list" id="contact-list" aria-live="polite"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:18px">
+        <button class="btn btn-soft" data-choice="cancel">Annuler</button>
+        <button class="btn btn-primary" data-choice="ok" disabled>Créer</button>
+      </div>`;
+    document.body.appendChild(dialog);
+    dialog.showModal();
+
+    const list = dialog.querySelector('#contact-list');
+    const okBtn = dialog.querySelector('[data-choice="ok"]');
+    const search = dialog.querySelector('#contact-search');
+    const chosen = new Map();
+    let timer = null;
+    let seq = 0;
+
+    const paintButton = () => {
+      okBtn.disabled = chosen.size === 0;
+      okBtn.textContent =
+        chosen.size === 0 ? 'Créer'
+          : chosen.size === 1 ? 'Discuter' : `Créer le groupe (${chosen.size})`;
+    };
+
+    const renderRows = (rows) => {
+      if (rows.length === 0) {
+        list.innerHTML = `<p class="tiny muted" style="padding:14px 4px">${
+          search.value.trim() ? 'Aucun profil ne correspond.' : 'Aucun autre profil sur ce serveur pour le moment.'
+        }</p>`;
+        return;
+      }
+      list.innerHTML = rows
+        .map((p) => {
+          const name = p.display_name || p.handle;
+          const on = chosen.has(p.id);
+          return `<button class="contact-row${on ? ' on' : ''}" data-id="${esc(p.id)}"
+              data-handle="${esc(p.handle)}" data-name="${esc(name)}"
+              role="option" aria-selected="${on}">
+            <span class="avatar sm">${esc(name.slice(0, 2).toUpperCase())}</span>
+            <span class="contact-meta"><strong>${esc(name)}</strong><span class="tiny muted">@${esc(p.handle)}</span></span>
+            <span class="contact-check" aria-hidden="true">${on ? '✓' : ''}</span>
+          </button>`;
+        })
+        .join('');
+    };
+
+    list.addEventListener('click', (event) => {
+      const row = event.target.closest('.contact-row');
+      if (!row) return;
+      const person = { id: row.dataset.id, handle: row.dataset.handle, display_name: row.dataset.name };
+      if (chosen.has(person.id)) chosen.delete(person.id);
+      else chosen.set(person.id, person);
+      row.classList.toggle('on', chosen.has(person.id));
+      row.setAttribute('aria-selected', String(chosen.has(person.id)));
+      row.querySelector('.contact-check').textContent = chosen.has(person.id) ? '✓' : '';
+      paintButton();
+    });
+
+    const load = async () => {
+      const q = search.value.trim().replace(/^@/, '').replace(/[*,()]/g, '');
+      const mine = ++seq;
+      list.innerHTML = '<p class="tiny muted" style="padding:14px 4px">Recherche…</p>';
+      try {
+        const filter = q
+          ? `&or=(handle.ilike.*${q}*,display_name.ilike.*${q}*)`
+          : '';
+        const rows = await rest('profiles', {
+          query: `select=id,handle,display_name&order=handle.asc&limit=20&id=neq.${S.profile.id}${filter}`,
+        });
+        if (mine !== seq) return;
+        renderRows(rows ?? []);
+      } catch (error) {
+        if (mine !== seq) return;
+        list.innerHTML = `<p class="tiny" style="padding:14px 4px;color:var(--danger)">${esc(humanError(error))}</p>`;
+      }
+    };
+
+    search.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(load, 250);
+    });
+
+    const finish = (result) => {
+      clearTimeout(timer);
+      dialog.close();
+      dialog.remove();
+      resolve(result);
+    };
+
+    dialog.addEventListener('click', (event) => {
+      const choice = event.target.closest('[data-choice]')?.dataset.choice;
+      if (choice === 'cancel') finish(null);
+      if (choice === 'ok' && chosen.size > 0) finish([...chosen.values()]);
+    });
+    dialog.addEventListener('cancel', () => finish(null));
+
+    paintButton();
+    load();
+  });
+}
+
 // --------------------------------------------------------------------- icônes
 
 const svg = (paths) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
@@ -1138,6 +1252,12 @@ function chatView() {
       <textarea class="textarea" name="body" maxlength="${MAX_MESSAGE_LENGTH}" placeholder="Message…" aria-label="Message" style="min-height:52px"></textarea>
       <button class="icon-btn" type="submit" style="color:var(--primary);flex:none" aria-label="Envoyer">${ICON.send}</button>
     </form>
+    <div class="chat-actions">
+      <button class="btn btn-soft btn-sm" data-act="leave-chat">Quitter la conversation</button>
+      ${conversation?.created_by === S.profile?.id
+        ? '<button class="btn btn-soft btn-sm danger-text" data-act="delete-chat">Supprimer pour tout le monde</button>'
+        : ''}
+    </div>
   `, { title: `${conversation?.title || 'Conversation'}${S.streaks[S.param] ? ` · 🔥 ${S.streaks[S.param]}` : ''}`, back: '#/messages' });
 }
 
@@ -1237,18 +1357,25 @@ async function sendMessage(conversationId, body) {
 }
 
 async function newConversation() {
-  const handle = await promptDialog({ title: 'Nouvelle conversation', label: 'Pseudo du destinataire', placeholder: 'antoine' });
-  if (!handle) return;
+  const people = await contactPickerDialog({ title: 'Nouvelle conversation' });
+  if (!people || people.length === 0) return;
+  const isGroup = people.length > 1;
+  const fallbackTitle = people.map((p) => p.display_name || p.handle).slice(0, 3).join(', ');
+  let title = people[0].display_name || people[0].handle;
+  if (isGroup) {
+    const asked = await promptDialog({
+      title: 'Nom du groupe',
+      label: 'Nom du groupe',
+      placeholder: fallbackTitle,
+    });
+    title = (asked ?? '').trim() || fallbackTitle;
+  }
   try {
-    const rows = await rest('profiles', { query: `select=id,handle,display_name&handle=eq.${encodeURIComponent(handle.toLowerCase())}` });
-    const peer = rows?.[0];
-    if (!peer) throw new Error('Aucun profil ne porte ce pseudo.');
-    if (peer.id === S.profile.id) throw new Error('Vous ne pouvez pas vous écrire à vous-même.');
     const id = crypto.randomUUID();
     const conversation = {
       id,
-      title: peer.display_name,
-      is_group: false,
+      title,
+      is_group: isGroup,
       created_by: S.profile.id,
       created_at: new Date().toISOString(),
       last_message_at: new Date().toISOString(),
@@ -1256,9 +1383,11 @@ async function newConversation() {
     };
     S.conversations = [conversation, ...S.conversations];
     await cacheSet('conversations', S.conversations);
-    await enqueue('conversation_create', { id, title: peer.display_name, is_group: false, created_by: S.profile.id });
+    await enqueue('conversation_create', { id, title, is_group: isGroup, created_by: S.profile.id });
     await enqueue('conversation_member_add', { conversation_id: id, user_id: S.profile.id });
-    await enqueue('conversation_member_add', { conversation_id: id, user_id: peer.id });
+    for (const person of people) {
+      await enqueue('conversation_member_add', { conversation_id: id, user_id: person.id });
+    }
     await syncNow();
     location.hash = `#/chat/${id}`;
     await navigate();
@@ -2350,8 +2479,12 @@ async function navigate() {
       break;
     case 'chat':
       render();
+      // The conversation row carries the title and the creator: without it the header falls back
+      // to "Conversation" and the delete action cannot be offered to its owner.
+      await loadConversations({ refresh: true });
       await loadMessages(S.param);
       await loadStreaks();
+      render();
       break;
     case 'communities':
       render();
@@ -2484,6 +2617,58 @@ document.addEventListener('click', async (event) => {
         await loadStreaks();
         render();
         break;
+      case 'leave-chat': {
+        const id = S.param;
+        const ok = await confirmDialog({
+          title: 'Quitter la conversation ?',
+          text: 'Elle disparaîtra de votre liste. Les messages déjà envoyés restent visibles pour les autres participants.',
+          confirmLabel: 'Quitter',
+        });
+        if (!ok) break;
+        try {
+          await rest('conversation_members', {
+            method: 'DELETE',
+            query: `conversation_id=eq.${id}&user_id=eq.${S.profile.id}`,
+          });
+          // PostgREST answers 204 even when RLS filtered every row: verify instead of trusting it.
+          const rows = await rest('conversation_members', {
+            query: `select=conversation_id&conversation_id=eq.${id}&user_id=eq.${S.profile.id}`,
+          });
+          if (rows && rows.length > 0) throw new Error('Le serveur a refusé de vous retirer de cette conversation.');
+          S.conversations = S.conversations.filter((c) => c.id !== id);
+          await cacheSet('conversations', S.conversations);
+          toast('Conversation quittée.');
+          location.hash = '#/messages';
+        } catch (error) {
+          toast(humanError(error));
+        }
+        break;
+      }
+      case 'delete-chat': {
+        const id = S.param;
+        const ok = await confirmDialog({
+          title: 'Supprimer pour tout le monde ?',
+          text: 'La conversation et tous ses messages seront supprimés pour chaque participant. Cette action est définitive.',
+          confirmLabel: 'Supprimer',
+          danger: true,
+        });
+        if (!ok) break;
+        try {
+          await rest('conversations', { method: 'DELETE', query: `id=eq.${id}` });
+          const rows = await rest('conversations', { query: `select=id&id=eq.${id}` });
+          if (rows && rows.length > 0) {
+            throw new Error('Suppression refusée par le serveur : appliquez la migration 0008_conversations_delete.sql.');
+          }
+          S.conversations = S.conversations.filter((c) => c.id !== id);
+          await cacheSet('conversations', S.conversations);
+          await cacheSet(`messages:${id}`, []);
+          toast('Conversation supprimée.');
+          location.hash = '#/messages';
+        } catch (error) {
+          toast(humanError(error));
+        }
+        break;
+      }
       case 'qr-add':
         qrDialog();
         break;
@@ -2822,11 +3007,27 @@ async function boot() {
 }
 
 if ('serviceWorker' in navigator) {
+  // A deploy replaces the shell, but an already-open page keeps the old worker until it is
+  // reloaded: that is how a user ends up running code that is no longer deployed. When a new
+  // worker takes control, reload once so the page always matches the deployed version.
+  const controlledAtBoot = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!controlledAtBoot) return;
+    if (sessionStorage.getItem('tomate:shell-reloaded') === '1') return;
+    sessionStorage.setItem('tomate:shell-reloaded', '1');
+    location.reload();
+  });
   window.addEventListener('load', async () => {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js');
       registration.addEventListener('updatefound', () => {
-        toast('Mise à jour disponible : rechargez pour l’appliquer.');
+        toast('Mise à jour TOMATE en cours d’application…');
+      });
+      // Browsers may reuse a cached worker script for up to 24 h. `update()` bypasses that cache,
+      // so a deployment is picked up at the next launch instead of the next day.
+      registration.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') registration.update().catch(() => {});
       });
     } catch {
       // The app still works without a service worker (no offline cache).

@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.1.7
+# STATUS — TOMATE 0.1.8
 
 Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.7-debug.apk` — 24 Mo, `versionCode 8` |
+| APK | `artifacts/tomate-0.1.8-debug.apk` — 24 Mo, `versionCode 9` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -20,7 +20,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 |---|---|
 | Code | `web/` (sans build), `sites.web.json` |
 | Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
-| Version | `0.1.7-web` |
+| Version | `0.1.8-web` |
 | Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
 | Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
 | Messagerie | message PWA → second compte **HTTP 201 vérifié**, réponse → PWA affichée |
@@ -199,3 +199,35 @@ notification push (projet Firebase et fonction Edge non déployés), test A→B�
 La connexion par mot de passe ne persistait pas la session : `fetchMyProfile` lisait une session
 vide et l'écran annonçait « Ce compte n'a pas encore de profil ». `signInWithPassword` enregistre
 désormais la session avant de rendre la main.
+
+## 2 sexies. Itération 0.1.8 — vérifié le 9 novembre 2026
+
+Objectif de cette itération : traiter des défauts concrets plutôt qu'ajouter des écrans.
+
+| Point | Avant | Après | Preuve |
+|---|---|---|---|
+| Création de conversation (Android) | champ « pseudos séparés par des virgules » | sélecteur de contacts avec recherche, sélection multiple, avatars | `:app:assembleDebug` **BUILD SUCCESSFUL** |
+| Création de conversation (PWA) | `prompt()` sur un pseudo exact | sélecteur de contacts (dialog) avec recherche serveur, 1 ou plusieurs personnes | testé sur l'aperçu déployé : 20 profils réels listés |
+| Conversation créée depuis la PWA | — | écrite sur le serveur, visible par le destinataire, réponse reçue dans la PWA | conversation `79263ab9…`, message lu par le destinataire, réponse `201` affichée |
+| Quitter une conversation | impossible (aucun bouton) | bouton « Quitter », vérifié côté serveur | adhésion supprimée (`conversation_members`), liste vidée |
+| Supprimer pour tout le monde | impossible | bouton réservé au créateur + politique `0008` | refus honnête constaté tant que `0008` n'est pas appliquée |
+| Code déployé réellement exécuté | l'ancien service worker restait actif : la PWA affichait l'ancien code après déploiement | rechargement automatique quand un nouveau worker prend la main | constaté : cache `tomate-shell-v23` encore actif après un déploiement 0.1.8 |
+| Titre de conversation | « Conversation » si le cache était incomplet | la conversation est rechargée avant d'afficher l'en-tête | titre « Contact Picker » affiché après correctif |
+
+Non fait dans cette itération (déclaré, pas simulé) : suppression/quitter une conversation côté
+Android (l'API `conversations_delete_creator` existe, l'écran n'a pas encore l'action), appels,
+E2EE, modération, événements, sondages, notes, annonces, assistant, refonte visuelle Android.
+
+### Diagnostic des « changements qui n'apparaissent pas »
+
+Deux causes mesurées, corrigées :
+
+1. **Service worker périmé.** Le worker `v23` restait maître de la page après un déploiement ; la
+   PWA exécutait l'ancien `app.js` alors que `config.js` annonçait la nouvelle version. Corrigé par
+   un rechargement automatique sur `controllerchange` (une seule fois par session) et par
+   `registration.update()` au lancement et au retour au premier plan, qui contourne le cache HTTP
+   de 24 h du script du service worker. Mesuré sur l'aperçu déployé : cache `v24` → `v25` et
+   rechargement automatique (`tomate:shell-reloaded = 1`) sans intervention.
+2. **Versions multiples.** Un APK installé peut être antérieur au dépôt : l'écran
+   *Profil → À propos* affiche `TOMATE 0.1.8 (build 9)`. Toute capture sans ce numéro correspond à
+   une version antérieure.

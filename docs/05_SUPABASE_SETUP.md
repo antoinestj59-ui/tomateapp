@@ -52,6 +52,7 @@ ordre**, en collant l'intégralité du contenu de chaque fichier (jamais son che
    — photos et vidéos dans les publications, bucket `posts`, fil étendu (média, communauté),
    liste des membres d'un groupe public, adhésion honnête (public = actif, privé = demande).
 7. [`supabase/migrations/0007_compte_notifications.sql`](../supabase/migrations/0007_compte_notifications.sql)
+8. [`supabase/migrations/0008_conversations_delete.sql`](../supabase/migrations/0008_conversations_delete.sql)
    — notifications persistantes (messages, réactions, commentaires, adhésions), abonnements
    Web Push et jetons FCM. Déclencheurs serveur : le client ne crée jamais de notification.
 
@@ -246,3 +247,14 @@ select user_id, platform from public.device_tokens;
 ```
 
 L'envoi vers un téléphone est décrit dans `docs/10_PUSH_FIREBASE.md`.
+
+## Migration 0008 — quitter ou supprimer une conversation
+
+`supabase/migrations/0008_conversations_delete.sql` ajoute la politique manquante
+`conversations_delete_creator` : sans elle, un créateur ne pouvait pas supprimer son groupe et
+PostgREST répondait `204` sans rien supprimer (les lignes filtrées par RLS ne sont pas comptées).
+La PWA vérifie désormais la suppression en relisant la ligne, et affiche
+« Suppression refusée par le serveur : appliquez la migration 0008… » si elle n'est pas appliquée.
+
+Quitter une conversation ne nécessite pas cette migration : la politique
+`conversation_members_delete_self` existait déjà depuis `0002_rls.sql`.

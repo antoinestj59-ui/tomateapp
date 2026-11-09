@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import tomate.core.model.AppError
+import tomate.core.model.ContactCandidate
 import tomate.core.model.Conversation
 import tomate.core.model.Message
 import tomate.core.model.MessageDeliveryState
@@ -206,6 +207,49 @@ class MessagingRepository(
                     else enqueue("conversation_member_add_handle", id, handlePayload(id, peer))
                 }
                 Outcome.Failure(remote.error)
+            }
+        }
+    }
+
+    /**
+     * Contact suggestions for the "new conversation" picker.
+     *
+     * Only profiles actually returned by the server are listed: there is no fixture and no
+     * invented person. A blank query lists the profiles the account may see; a non-blank query is
+     * matched server-side on `handle` and `display_name`, so typing "an" finds @antoine.
+     */
+    suspend fun searchContacts(query: String, limit: Int = 20): Outcome<List<ContactCandidate>> {
+        if (session.isLocalAccount()) return Outcome.Success(emptyList())
+        val trimmed = query.trim().removePrefix("@").replace("*", "")
+        val filters = buildList {
+            add("select" to "id,handle,display_name")
+            add("order" to "handle.asc")
+            add("limit" to limit.toString())
+            session.currentUserId?.let { add("id" to "neq.$it") }
+            if (trimmed.isNotEmpty()) {
+                val pattern = "*$trimmed*"
+                add("or" to "(handle.ilike.$pattern,display_name.ilike.$pattern)")
+            }
+        }
+        return when (val response = api.select("profiles", filters)) {
+            is Outcome.Failure -> response
+            is Outcome.Success -> {
+                val rows = runCatching {
+                    SupabaseApi.json.decodeFromString(ListSerializer(ProfileDto.serializer()), response.value)
+                }.getOrNull()
+                if (rows == null) {
+                    Outcome.Failure(AppError.Unknown("Contacts illisibles"))
+                } else {
+                    Outcome.Success(
+                        rows.map { dto ->
+                            ContactCandidate(
+                                id = dto.id,
+                                handle = dto.handle,
+                                displayName = dto.displayName.ifBlank { dto.handle },
+                            )
+                        },
+                    )
+                }
             }
         }
     }
