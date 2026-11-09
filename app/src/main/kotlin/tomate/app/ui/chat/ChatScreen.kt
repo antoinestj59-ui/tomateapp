@@ -15,7 +15,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +28,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +44,32 @@ import tomate.core.designsystem.components.TomateTextField
 import tomate.core.designsystem.components.NoticeTone
 import tomate.core.designsystem.theme.TomateSpacing
 
+@Composable
+private fun ConversationMenu(viewModel: ChatViewModel, canDelete: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    IconButton(onClick = { open = true }) {
+        Icon(Icons.Default.MoreVert, contentDescription = "Actions de la conversation")
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenuItem(
+            text = { Text("Quitter la conversation") },
+            onClick = {
+                open = false
+                viewModel.leave()
+            },
+        )
+        if (canDelete) {
+            DropdownMenuItem(
+                text = { Text("Supprimer pour tout le monde") },
+                onClick = {
+                    open = false
+                    viewModel.deleteForEveryone()
+                },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -50,6 +82,10 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+
+    LaunchedEffect(Unit) {
+        viewModel.closed.collect { if (it) onBack() }
+    }
 
     LaunchedEffect(state.messages.size) {
         if (state.messages.isNotEmpty()) {
@@ -82,6 +118,7 @@ fun ChatScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                 }
             },
+            actions = { ConversationMenu(viewModel = viewModel, canDelete = state.canDelete) },
         )
 
         if (state.error != null) {

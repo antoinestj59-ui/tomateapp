@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.1.8
+# STATUS — TOMATE 0.1.9
 
 Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.8-debug.apk` — 24 Mo, `versionCode 9` |
+| APK | `artifacts/tomate-0.1.9-debug.apk` — 24 Mo, `versionCode 10` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -231,3 +231,37 @@ Deux causes mesurées, corrigées :
 2. **Versions multiples.** Un APK installé peut être antérieur au dépôt : l'écran
    *Profil → À propos* affiche `TOMATE 0.1.8 (build 9)`. Toute capture sans ce numéro correspond à
    une version antérieure.
+
+## 2 septies. Itération 0.1.9 — vérifié le 9 novembre 2026
+
+### Ce qui a été créé
+
+| Élément | Fichier | État |
+|---|---|---|
+| Pièces jointes de conversation (photo, vidéo, vocal) | `web/js/app.js`, `web/css/app.css` | code déployé, **envoi effectif en attente de la migration 0009** |
+| Bucket privé `messages` + colonnes `media_*` + politiques membres | `supabase/migrations/0009_medias_messagerie.sql` | écrit, validé pglast, **non appliqué** (aucune clé `service_role` ici) |
+| Export de mes données (profil, publications, stories, messages) | `web/js/app.js` (`exportMyData`) | **testé sur l'aperçu déployé** |
+| Quitter / supprimer une conversation (Android) | `MessagingRepository`, `ChatViewModel`, `ChatScreen`, `Daos.kt` | **compilé** (`assembleDebug`), non exécuté faute d'appareil |
+
+### Vérifications réellement exécutées sur l'aperçu déployé
+
+| Action | Résultat observé |
+|---|---|
+| Version PWA | cache `tomate-shell-v27`, `0.1.9-web` |
+| Connexion `verifmedia` par e-mail + mot de passe | session restaurée, même `user.id` |
+| Composer de conversation | bouton trombone + champ fichier présents |
+| Sélection d'une image PNG (320×200) | aperçu « Photo · 3 Ko · JPG » (compression client 1440 px) |
+| Envoi avec pièce jointe, bucket absent | toast « Pièces jointes non activées : appliquez la migration 0009_medias_messagerie.sql. », **aucun message fantôme créé**, texte et aperçu conservés |
+| Envoi texte après refonte | message `Texte seul après refonte 0.1.9` affiché, « 1 opération(s) synchronisée(s) » |
+| Export des données | « 0 publication(s), 0 story(s), 1 message(s) exportés. » — comptes réels, pas de valeurs inventées |
+
+### Limites de cette itération
+
+- **Le chemin média n'est pas vérifié de bout en bout** : sans la migration 0009, le bucket et les
+  colonnes n'existent pas. Le refus est explicite et testé ; l'upload réel, la lecture par un second
+  compte et le refus d'un non-membre restent à exécuter après application de 0009.
+- Android : `assembleDebug` passe (`versionCode 10`), mais quitter/supprimer une conversation n'est
+  pas exécuté sur appareil ; la suppression « pour tout le monde » dépend aussi de la migration 0008.
+- Toujours non appliquées par le propriétaire : `0007` (notifications), `0008`, `0009`.
+- Non entamé : appels audio/vidéo, E2EE réel, mesh A→B→C, sondages, événements, modération
+  administrateur, assistant.

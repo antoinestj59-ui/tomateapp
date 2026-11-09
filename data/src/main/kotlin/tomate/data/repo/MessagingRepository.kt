@@ -368,6 +368,84 @@ class MessagingRepository(
         updatePendingCount(message.conversationId)
     }
 
+    /**
+     * True when the signed-in account created the conversation. The list screen offers no
+     * "delete for everyone" button otherwise, so it is never a dead control.
+     */
+    suspend fun isConversationCreator(conversationId: String): Boolean {
+        val me = session.currentUserId ?: return false
+        val query = listOf(
+            "select" to "id",
+            "id" to "eq.$conversationId",
+            "created_by" to "eq.$me",
+        )
+        val rows = api.select("conversations", query)
+        if (rows !is Outcome.Success) return false
+        return rows.value.trim() != "[]"
+    }
+
+    /**
+     * Leaves a conversation: only this account's membership row is deleted, the other
+     * participants keep the history. PostgREST answers 204 even when RLS filtered every row, so
+     * the membership is read back instead of trusting the status code.
+     */
+    suspend fun leaveConversation(conversationId: String): Outcome<Unit> {
+        val me = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        val filter = listOf("conversation_id" to "eq.$conversationId", "user_id" to "eq.$me")
+        when (val remote = api.delete("conversation_members", filter)) {
+            is Outcome.Failure -> return remote
+            is Outcome.Success -> Unit
+        }
+        val remaining = api.select("conversation_members", filter + ("select" to "conversation_id"))
+        return when (remaining) {
+            is Outcome.Failure -> remaining
+            is Outcome.Success ->
+                if (remaining.value.trim() != "[]") {
+                    Outcome.Failure(AppError.Unknown("Le serveur n'a pas retiré votre adhésion."))
+                } else {
+                    forgetLocally(conversationId)
+                    Outcome.Success(Unit)
+                }
+        }
+    }
+
+    /**
+     * Deletes a conversation for every participant. Only the creator can do it: the server
+     * policy `conversations_delete_creator` (migration 0008) enforces it, and the row is read
+     * back so a refused delete is reported instead of shown as a success.
+     */
+    suspend fun deleteConversation(conversationId: String): Outcome<Unit> {
+        session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        if (!isConversationCreator(conversationId)) {
+            return Outcome.Failure(AppError.Unknown("Seul le créateur peut supprimer cette conversation."))
+        }
+        when (val remote = api.delete("conversations", listOf("id" to "eq.$conversationId"))) {
+            is Outcome.Failure -> return remote
+            is Outcome.Success -> Unit
+        }
+        val stillThere = api.select("conversations", listOf("select" to "id", "id" to "eq.$conversationId"))
+        return when (stillThere) {
+            is Outcome.Failure -> stillThere
+            is Outcome.Success ->
+                if (stillThere.value.trim() != "[]") {
+                    Outcome.Failure(
+                        AppError.Unknown(
+                            "Suppression refusée : appliquez la migration 0008_conversations_delete.sql.",
+                        ),
+                    )
+                } else {
+                    forgetLocally(conversationId)
+                    Outcome.Success(Unit)
+                }
+        }
+    }
+
+    private suspend fun forgetLocally(conversationId: String) {
+        messageDao.deleteForConversation(conversationId)
+        conversationDao.deleteMembers(conversationId)
+        conversationDao.delete(conversationId)
+    }
+
     suspend fun markConversationRead(conversationId: String) {
         val me = session.currentUserId ?: return
         messageDao.markConversationRead(conversationId, me)

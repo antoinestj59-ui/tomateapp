@@ -52,9 +52,12 @@ ordre**, en collant l'intégralité du contenu de chaque fichier (jamais son che
    — photos et vidéos dans les publications, bucket `posts`, fil étendu (média, communauté),
    liste des membres d'un groupe public, adhésion honnête (public = actif, privé = demande).
 7. [`supabase/migrations/0007_compte_notifications.sql`](../supabase/migrations/0007_compte_notifications.sql)
-8. [`supabase/migrations/0008_conversations_delete.sql`](../supabase/migrations/0008_conversations_delete.sql)
    — notifications persistantes (messages, réactions, commentaires, adhésions), abonnements
    Web Push et jetons FCM. Déclencheurs serveur : le client ne crée jamais de notification.
+8. [`supabase/migrations/0008_conversations_delete.sql`](../supabase/migrations/0008_conversations_delete.sql)
+   — suppression d'une conversation par son créateur (`conversations_delete_creator`).
+9. [`supabase/migrations/0009_medias_messagerie.sql`](../supabase/migrations/0009_medias_messagerie.sql)
+   — photos, vidéos et messages vocaux en conversation, bucket **privé** `messages`.
 
 Dans l'éditeur GitHub, le bouton **Copier** en haut à droite du fichier copie le contenu
 exact ; c'est ce contenu qu'il faut coller.
@@ -258,3 +261,21 @@ La PWA vérifie désormais la suppression en relisant la ligne, et affiche
 
 Quitter une conversation ne nécessite pas cette migration : la politique
 `conversation_members_delete_self` existait déjà depuis `0002_rls.sql`.
+
+## Migration 0009 — pièces jointes des conversations
+
+`0009_medias_messagerie.sql` ajoute `media_path`, `media_kind`, `media_mime` et `media_size` à
+`public.messages`, puis crée le bucket **privé** `messages` (25 Mo, images, vidéos, audio).
+
+Contrairement aux buckets `posts` et `stories`, qui sont publics parce qu'ils alimentent le fil,
+aucun fichier de conversation n'est servi sans session : les politiques de `storage.objects`
+exigent d'être membre de la conversation, et le client obtient une URL signée de 6 heures.
+
+Arborescence : `messages/<conversation_id>/<expéditeur>/<fichier>`. Un chemin malformé ne peut
+pas faire échouer l'évaluation : `public.safe_uuid()` renvoie `null` au lieu de lever 22P02.
+
+Sans cette migration, l'application refuse honnêtement l'envoi :
+« Pièces jointes non activées : appliquez la migration 0009_medias_messagerie.sql. »
+
+Limites appliquées côté client : photo compressée à 1440 px (12 Mo avant compression), vidéo
+25 Mo, message vocal 10 Mo. Le bucket applique 25 Mo pour tous les types.

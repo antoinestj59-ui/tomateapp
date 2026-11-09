@@ -73,6 +73,8 @@ const S = {
   draft: '',
   draftCommunity: {},
   postMedia: null,
+  chatMedia: null,
+  mediaUrls: {},
   communityMembers: {},
   communityFilter: '',
   search: { q: '', results: [], busy: false, error: null },
@@ -338,6 +340,7 @@ const ICON = {
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/>'),
   image: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 3-3 3 3"/>'),
   video: svg('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 11 5-3v8l-5-3Z"/>'),
+  paperclip: svg('<path d="M21.4 11.05 12.3 20.2a6 6 0 0 1-8.5-8.5l8.5-8.5a4 4 0 0 1 5.7 5.7l-8.5 8.5a2 2 0 0 1-2.8-2.8l7.8-7.8"/>'),
   link: svg('<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1"/>'),
   bell: svg('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
 };
@@ -1248,7 +1251,10 @@ function chatView() {
     <div class="card" style="min-height:40vh;display:flex;flex-direction:column;gap:8px;padding:14px">
       ${S.messages.length === 0 ? emptyState('💬', 'Aucun message.', 'Écrivez le premier message.') : S.messages.map(messageItem).join('')}
     </div>
+    ${chatMediaPreview()}
     <form data-form="send-message" data-conversation="${esc(S.param)}" class="card" style="margin-top:12px;display:flex;gap:10px;align-items:flex-end">
+      <input type="file" id="chat-media-input" accept="image/*,video/*,audio/*" hidden />
+      <button class="icon-btn" type="button" data-act="chat-attach" style="flex:none" aria-label="Joindre une photo, une vidéo ou un message vocal">${ICON.paperclip}</button>
       <textarea class="textarea" name="body" maxlength="${MAX_MESSAGE_LENGTH}" placeholder="Message…" aria-label="Message" style="min-height:52px"></textarea>
       <button class="icon-btn" type="submit" style="color:var(--primary);flex:none" aria-label="Envoyer">${ICON.send}</button>
     </form>
@@ -1261,10 +1267,123 @@ function chatView() {
   `, { title: `${conversation?.title || 'Conversation'}${S.streaks[S.param] ? ` · 🔥 ${S.streaks[S.param]}` : ''}`, back: '#/messages' });
 }
 
+// ------------------------------------------------- pièces jointes de conversation
+const CHAT_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+const CHAT_MEDIA_TTL_SECONDS = 6 * 3600;
+
+async function prepareChatMedia(file) {
+  if (!file) return null;
+  if (file.type.startsWith('audio/')) {
+    if (file.size > 10 * 1024 * 1024) throw new Error('Message vocal trop lourd : 10 Mo maximum.');
+    const ext = file.type.includes('mpeg') ? 'mp3'
+      : file.type.includes('mp4') ? 'm4a'
+        : file.type.includes('ogg') ? 'ogg'
+          : 'webm';
+    return { blob: file, type: 'audio', mime: file.type, ext, preview: null };
+  }
+  const media = await prepareStoryMedia(file);
+  if (media.blob.size > CHAT_MEDIA_MAX_BYTES) throw new Error('Pièce jointe trop lourde : 25 Mo maximum.');
+  return media;
+}
+
+async function uploadChatMedia(conversationId, media) {
+  const session = await ensureRemoteSession();
+  if (!session) throw new Error('Connexion requise pour envoyer une pièce jointe.');
+  const path = `${conversationId}/${session.userId}/${crypto.randomUUID()}.${media.ext}`;
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/messages/${encoded}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': media.mime,
+      'x-upsert': 'false',
+    },
+    body: media.blob,
+  });
+  if (!response.ok) {
+    const hint = response.status === 400 || response.status === 404
+      ? 'Pièces jointes non activées : appliquez la migration 0009_medias_messagerie.sql.'
+      : `Envoi de la pièce jointe refusé (HTTP ${response.status}).`;
+    throw new Error(hint);
+  }
+  return { path, mime: media.mime, size: media.blob.size, kind: media.type };
+}
+
+/** URL signée temporaire : le bucket messages est privé, jamais servi en public. */
+async function chatMediaUrl(path) {
+  if (!path) return null;
+  const cached = S.mediaUrls[path];
+  if (cached && cached.expires > Date.now()) return cached.url;
+  const session = await ensureRemoteSession();
+  if (!session) return null;
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/messages/${encoded}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ expiresIn: CHAT_MEDIA_TTL_SECONDS }),
+  });
+  if (!response.ok) return null;
+  const payload = await response.json();
+  if (!payload?.signedURL) return null;
+  const url = `${SUPABASE_URL}/storage/v1${payload.signedURL}`;
+  S.mediaUrls[path] = { url, expires: Date.now() + (CHAT_MEDIA_TTL_SECONDS - 600) * 1000 };
+  return url;
+}
+
+async function resolveChatMedia(messages) {
+  const paths = [...new Set((messages ?? []).map((m) => m.media_path).filter(Boolean))]
+    .filter((path) => !S.mediaUrls[path] || S.mediaUrls[path].expires <= Date.now());
+  for (const path of paths) {
+    try {
+      await chatMediaUrl(path);
+    } catch {
+      // L'affichage dira que la pièce jointe est momentanément indisponible.
+    }
+  }
+}
+
+function messageMediaHtml(message) {
+  if (!message.media_path) return '';
+  const url = S.mediaUrls[message.media_path]?.url ?? null;
+  if (!url) {
+    return '<div class="chat-media unavailable tiny">Pièce jointe indisponible pour le moment.</div>';
+  }
+  if (message.media_kind === 'video') {
+    return `<video class="chat-media" src="${esc(url)}" controls playsinline preload="metadata"></video>`;
+  }
+  if (message.media_kind === 'audio') {
+    return `<audio class="chat-media audio" src="${esc(url)}" controls preload="metadata"></audio>`;
+  }
+  return `<a href="${esc(url)}" target="_blank" rel="noopener"><img class="chat-media" src="${esc(url)}" alt="Photo envoyée" loading="lazy" /></a>`;
+}
+
+function chatMediaPreview() {
+  const media = S.chatMedia;
+  if (!media) return '';
+  const preview = media.type === 'video'
+    ? `<video src="${esc(media.preview)}" muted playsinline preload="metadata"></video>`
+    : media.type === 'image'
+      ? `<img src="${esc(media.preview)}" alt="Aperçu de la photo" />`
+      : '<span class="chat-media-glyph">🎙️</span>';
+  const label = media.type === 'audio' ? 'Message vocal' : media.type === 'video' ? 'Vidéo' : 'Photo';
+  return `<div class="chat-media-preview">${preview}
+    <div class="grow">${label}
+      <div class="tiny muted">${Math.max(1, Math.round(media.blob.size / 1024))} Ko · ${esc(media.ext.toUpperCase())}</div>
+    </div>
+    <button class="remove" type="button" data-act="chat-drop-media" aria-label="Retirer la pièce jointe">${ICON.close}</button>
+  </div>`;
+}
+
 function messageItem(message) {
   const mine = message.sender_id === S.profile?.id;
   return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:16px">
-    <div style="white-space:pre-wrap">${esc(message.body)}</div>
+    ${messageMediaHtml(message)}
+    ${message.body ? `<div style="white-space:pre-wrap">${esc(message.body)}</div>` : ''}
     <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
   </div>`;
 }
@@ -1324,20 +1443,40 @@ async function loadMessages(conversationId) {
     const local = S.messages.filter((m) => m.pending || m.failed);
     S.messages = [...rows, ...local.filter((m) => !rows.some((r) => r.id === m.id))];
     await cacheSet(key, S.messages);
+    await resolveChatMedia(S.messages);
   } catch {
     // Cached messages stay readable.
   }
 }
 
-async function sendMessage(conversationId, body) {
+async function sendMessage(conversationId, body, media = S.chatMedia) {
   const text = body.trim();
-  if (!text) return;
+  if (!text && !media) return;
+  if (text.length > MAX_MESSAGE_LENGTH) return toast('Message trop long.');
+
+  // La pièce jointe part avant le message : un message ne doit jamais pointer vers un
+  // fichier qui n'est pas arrivé. En cas d'échec, texte et aperçu restent en place.
+  let attachment = null;
+  if (media) {
+    if (!ONLINE()) return toast('Pièce jointe : connexion requise. Le texte, lui, part hors ligne.');
+    try {
+      attachment = await uploadChatMedia(conversationId, media);
+    } catch (error) {
+      toast(humanError(error));
+      return;
+    }
+  }
+
   const message = {
     id: crypto.randomUUID(),
     client_id: crypto.randomUUID(),
     conversation_id: conversationId,
     sender_id: S.profile.id,
     body: text,
+    media_path: attachment?.path ?? null,
+    media_kind: attachment?.kind ?? null,
+    media_mime: attachment?.mime ?? null,
+    media_size: attachment?.size ?? null,
     created_at: new Date().toISOString(),
     pending: true,
   };
@@ -1351,7 +1490,18 @@ async function sendMessage(conversationId, body) {
     sender_id: message.sender_id,
     body: text,
     encrypted: false,
+    ...(attachment
+      ? {
+        media_path: attachment.path,
+        media_kind: attachment.kind,
+        media_mime: attachment.mime,
+        media_size: attachment.size,
+      }
+      : {}),
   });
+  if (S.chatMedia?.preview) URL.revokeObjectURL(S.chatMedia.preview);
+  S.chatMedia = null;
+  await resolveChatMedia([message]);
   render();
   await syncNow();
 }
@@ -2236,6 +2386,8 @@ function settingsView() {
         <button class="btn btn-soft" data-act="notify-test" ${caps.notifications ? '' : 'disabled'}>Tester</button></div>
       <div class="settings-row"><div><strong>Stockage</strong><div class="tiny muted">${S.storage ? `${S.storage.usageMb} Mo utilisés sur ${S.storage.quotaMb} Mo` : 'estimation indisponible'}</div></div>
         <button class="btn btn-soft" data-act="storage">Estimer</button></div>
+      <div class="settings-row"><div><strong>Exporter mes données</strong><div class="tiny muted">Profil, publications, stories et messages envoyés, en JSON</div></div>
+        <button class="btn btn-soft" data-act="export-data">${ICON.download} Exporter</button></div>
       <div class="settings-row"><div><strong>Vider le cache de contenu</strong><div class="tiny muted">Conserve le compte et la file d'attente</div></div>
         <button class="btn btn-danger" data-act="clear-cache">Vider</button></div>
     </div>
@@ -2257,6 +2409,43 @@ function settingsView() {
     </div>
     <p class="tiny muted center" style="margin-top:16px">TOMATE ${APP_VERSION} · client web · backend Supabase</p>
   `, { title: 'Paramètres', back: '#/profile' });
+}
+
+async function exportMyData() {
+  const session = await ensureRemoteSession();
+  if (!session) return toast('Connexion requise pour exporter vos données.');
+  toast('Préparation de l’export…');
+  try {
+    const owner = `author_id=eq.${session.userId}`;
+    const [profile, posts, stories, messages] = await Promise.all([
+      rest('profiles', { query: `select=*&id=eq.${session.userId}` }),
+      rest('posts', { query: `select=*&${owner}&order=created_at.desc&limit=1000` }),
+      rest('stories', { query: `select=*&${owner}&order=created_at.desc&limit=1000` }),
+      rest('messages', {
+        query: `select=*&sender_id=eq.${session.userId}&order=created_at.desc&limit=5000`,
+      }),
+    ]);
+    const payload = {
+      exported_at: new Date().toISOString(),
+      app: `TOMATE ${APP_VERSION}`,
+      profile: profile[0] ?? null,
+      posts,
+      stories,
+      sent_messages: messages,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `tomate-export-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast(`${posts.length} publication(s), ${stories.length} story(s), ${messages.length} message(s) exportés.`);
+  } catch (error) {
+    toast(humanError(error));
+  }
 }
 
 async function estimateStorage() {
@@ -2570,6 +2759,22 @@ function hydrateBodies() {
 
 // ------------------------------------------------------------------- actions
 
+document.addEventListener('change', async (event) => {
+  if (event.target.id !== 'chat-media-input') return;
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const media = await prepareChatMedia(file);
+    if (!media) return;
+    if (S.chatMedia?.preview) URL.revokeObjectURL(S.chatMedia.preview);
+    S.chatMedia = media;
+    render();
+  } catch (error) {
+    toast(humanError(error));
+  }
+});
+
 document.addEventListener('click', async (event) => {
   const trigger = event.target.closest('[data-act]');
   if (!trigger) return;
@@ -2616,6 +2821,17 @@ document.addEventListener('click', async (event) => {
         await loadConversations({ refresh: true });
         await loadStreaks();
         render();
+        break;
+      case 'chat-attach':
+        document.getElementById('chat-media-input')?.click();
+        break;
+      case 'chat-drop-media':
+        if (S.chatMedia?.preview) URL.revokeObjectURL(S.chatMedia.preview);
+        S.chatMedia = null;
+        render();
+        break;
+      case 'export-data':
+        await exportMyData();
         break;
       case 'leave-chat': {
         const id = S.param;
@@ -2888,7 +3104,7 @@ document.addEventListener('submit', async (event) => {
         form.reset();
         break;
       case 'send-message':
-        await sendMessage(form.dataset.conversation, String(data.get('body') ?? ''));
+        await sendMessage(form.dataset.conversation, String(data.get('body') ?? ''), S.chatMedia);
         form.reset();
         break;
       case 'signin': {

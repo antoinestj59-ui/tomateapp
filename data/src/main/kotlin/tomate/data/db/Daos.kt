@@ -170,6 +170,12 @@ interface ConversationDao {
 
     @Query("UPDATE conversation_members SET memberId = :newId WHERE memberId = :oldId")
     suspend fun reassignMember(oldId: String, newId: String)
+
+    @Query("DELETE FROM conversations WHERE id = :id")
+    suspend fun delete(id: String)
+
+    @Query("DELETE FROM conversation_members WHERE conversationId = :id")
+    suspend fun deleteMembers(id: String)
 }
 
 /** One row per conversation per UTC day, with the number of distinct senders that day. */
@@ -210,6 +216,9 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND deliveryState IN ('Pending','Failed')")
     suspend fun pendingCount(conversationId: String): Int
+
+    @Query("DELETE FROM messages WHERE conversationId = :conversationId")
+    suspend fun deleteForConversation(conversationId: String)
 
     @Query("SELECT COUNT(*) FROM messages WHERE deliveryState = 'Pending'")
     fun observePendingCount(): Flow<Int>
