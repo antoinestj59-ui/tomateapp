@@ -31,7 +31,7 @@ Deux façons de procéder, au choix.
 
 Ouvrir [`supabase/ALL_IN_ONE.sql`](../supabase/ALL_IN_ONE.sql), cliquer sur **Raw** (ou
 « Copier le fichier brut »), **tout** sélectionner, puis **Run** une seule fois. Ce fichier
-contient les trois migrations dans le bon ordre, séparées par des lignes de commentaire.
+contient les quatre migrations dans le bon ordre, séparées par des lignes de commentaire.
 
 ### B. Fichier par fichier
 
@@ -44,6 +44,8 @@ ordre**, en collant l'intégralité du contenu de chaque fichier (jamais son che
    — activation de RLS + politiques complètes + fonctions d'appui.
 3. [`supabase/migrations/0003_storage.sql`](../supabase/migrations/0003_storage.sql)
    — bucket d'avatars et politiques de stockage.
+4. [`supabase/migrations/0004_stories.sql`](../supabase/migrations/0004_stories.sql)
+   — stories de 24 h : tables `stories` / `story_views`, politiques RLS, vue `stories_feed`.
 
 Dans l'éditeur GitHub, le bouton **Copier** en haut à droite du fichier copie le contenu
 exact ; c'est ce contenu qu'il faut coller.
