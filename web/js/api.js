@@ -47,6 +47,7 @@ function normalize(json) {
     refreshToken: json.refresh_token ?? null,
     expiresAt: Date.now() + (Number(json.expires_in ?? 3600) - 30) * 1000,
     userId,
+    email: json?.user?.email ?? '',
     local: false,
   };
 }
@@ -69,6 +70,47 @@ async function authRequest(path, body) {
 
 export function signUpAnonymous() {
   return authRequest('signup', {});
+}
+
+/**
+ * Restaure un compte sur un nouvel appareil avec l'e-mail et le mot de passe associés.
+ * The session is persisted here: the caller must not depend on a second store call, otherwise
+ * `fetchMyProfile` would read an empty session and the restored account would look profile-less.
+ */
+export async function signInWithPassword(email, password) {
+  const session = await authRequest('token?grant_type=password', { email, password });
+  await storeSession(session);
+  return session;
+}
+
+/** Transforme le compte anonyme courant en compte permanent (e-mail + mot de passe). */
+export async function attachCredentials(email, password) {
+  const session = await ensureRemoteSession();
+  if (!session) throw new HttpError(401, 'connexion requise', true);
+  let response;
+  try {
+    response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: 'PUT',
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${session.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch (e) {
+    throw new HttpError(0, e.message, true);
+  }
+  const text = await response.text();
+  if (!response.ok) throw new HttpError(response.status, text);
+  return JSON.parse(text);
+}
+
+/** Retient l'e-mail du compte protégé dans la session locale (aucun secret y est stocké). */
+export async function rememberEmail(email) {
+  const session = await getSession();
+  if (!session) return;
+  await storeSession({ ...session, email });
 }
 
 /**

@@ -17,3 +17,5 @@ secrets.properties
 .env
 .env.*
 /artifacts/
+app/google-services.json
+*.serviceaccount.json

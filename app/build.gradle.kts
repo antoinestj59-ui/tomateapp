@@ -3,6 +3,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Firebase is opt-in: without the file, the build stays valid and the app runs with in-app
+// notifications only. See docs/10_PUSH_FIREBASE.md.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "tomate.app"
     compileSdk = 37
@@ -11,8 +17,8 @@ android {
         applicationId = "app.tomate"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.1.6"
+        versionCode = 8
+        versionName = "0.1.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -50,6 +56,9 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":data"))
     implementation(project(":net"))
+
+    // FCM client. Inert (guarded at runtime) until a google-services.json is added.
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

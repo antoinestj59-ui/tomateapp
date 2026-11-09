@@ -17,6 +17,7 @@ import tomate.data.repo.FeedRepository
 import tomate.data.repo.MessagingRepository
 import tomate.data.repo.ModerationRepository
 import tomate.data.repo.ProfileRepository
+import tomate.data.repo.PushRepository
 import tomate.data.repo.StoryRepository
 import tomate.data.security.CryptoBox
 import tomate.data.security.KeystoreCryptoBox
@@ -42,6 +43,7 @@ class TomateContainer(
         SupabaseApi(SupabaseConfig.url, SupabaseConfig.publishableKey, http)
     }
     val session: SessionManager by lazy { SessionManager(api, sessionStore) }
+    val push: PushRepository by lazy { PushRepository(api, session) }
     val e2ee: E2eeEngine = E2eeNotConfigured()
     val networkMonitor: NetworkMonitor by lazy { NetworkMonitor(appContext) }
     val settings: tomate.data.settings.SettingsStore by lazy {

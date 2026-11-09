@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.1.6
+# STATUS — TOMATE 0.1.7
 
 Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.6-debug.apk` — 23 Mo, `versionCode 7` |
+| APK | `artifacts/tomate-0.1.7-debug.apk` — 24 Mo, `versionCode 8` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -20,7 +20,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 |---|---|
 | Code | `web/` (sans build), `sites.web.json` |
 | Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
-| Version | `0.1.6-web` |
+| Version | `0.1.7-web` |
 | Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
 | Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
 | Messagerie | message PWA → second compte **HTTP 201 vérifié**, réponse → PWA affichée |
@@ -172,3 +172,30 @@ groupes de discussion, modération et administration. Le détail par fonction es
 - Aucune donnée météo inventée, aucune ancienneté masquée.
 - Aucune clé secrète dans le dépôt, l'APK ou la conversation (clé publishable uniquement).
 - Aucune publication en production, aucune publication Play Store.
+
+## 2 quinquies. Itération 0.1.7 — vérifié le 9 novembre 2026
+
+Migrations `0005` et `0006` exécutées par le propriétaire du projet. Vérifications **réelles**
+contre `omsupwmlncuapikbjumg.supabase.co` :
+
+| Élément | Résultat mesuré |
+|---|---|
+| Upload photo de publication | `POST /storage/v1/object/posts/…` → **200** |
+| Publication avec média | `POST /rest/v1/posts` → **201**, `feed.media_path` renseigné, image publique servie en `image/png` |
+| Média de story | upload **200**, story **201**, visible par un **second compte** |
+| Membre d'un groupe public | visible par un tiers (rôle `Owner`, statut `Active`) |
+| Adhésion à un groupe privé | **`Pending`** accepté ; tentative `Active` **refusée (403)** |
+| Publication photo depuis la PWA | parcours réel : sélecteur → compression (JPEG 1 Ko) → upload → fil, image chargée (64×64) |
+| Protection du compte | `PUT /auth/v1/user` (e-mail + mot de passe) → **200**, connexion par mot de passe → **même identifiant** `fb9b4773…`, profil `@verifmedia` retrouvé |
+| Restauration sur un autre appareil | second stockage navigateur (origine déployée) → « J'ai déjà un compte » → `#/feed` restauré, badge de notifications présent |
+| Notifications | table `0007` **non encore créée** : l'écran affiche honnêtement « Notifications pas encore activées : appliquez la migration 0007… » |
+| Android | `:app:assembleDebug` **BUILD SUCCESSFUL** (`versionCode 8`), client FCM inclus, plugin Google conditionnel (`google-services.json` absent → build valide) |
+
+Non vérifié, déclaré comme tel : envoi média Android (aucun appareil), affichage d'une
+notification push (projet Firebase et fonction Edge non déployés), test A→B→C, appels, E2EE.
+
+### Correctif trouvé par ce test
+
+La connexion par mot de passe ne persistait pas la session : `fetchMyProfile` lisait une session
+vide et l'écran annonçait « Ce compte n'a pas encore de profil ». `signInWithPassword` enregistre
+désormais la session avant de rendre la main.

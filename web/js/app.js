@@ -1,14 +1,18 @@
 // TOMATE — PWA. Un seul point d'entrée : routes par hash, rendu DOM, hors ligne réel.
 import {
   HttpError,
+  attachCredentials,
   clearSession,
   ensureActor,
   ensureRemoteSession,
+  fetchMyProfile,
   getSession,
   handleAvailable,
   isLocalId,
   linkLocalAccount,
+  rememberEmail,
   rest,
+  signInWithPassword,
   signUpAnonymous,
 } from './api.js';
 import {
@@ -72,6 +76,12 @@ const S = {
   communityMembers: {},
   communityFilter: '',
   search: { q: '', results: [], busy: false, error: null },
+  notifications: [],
+  notifActors: {},
+  unread: 0,
+  notificationsReady: null,
+  notificationsError: null,
+  authEmail: '',
 };
 
 const ONLINE = () => navigator.onLine;
@@ -215,6 +225,7 @@ const ICON = {
   image: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 3-3 3 3"/>'),
   video: svg('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 11 5-3v8l-5-3Z"/>'),
   link: svg('<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1"/>'),
+  bell: svg('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
 };
 
 /** Marque TOMATE : une tomate sobre, dessinée dans la couleur d'accent. */
@@ -263,6 +274,7 @@ function topbar({ title, back = null, actions = '' } = {}) {
     <div class="brand">${LOGO}<span class="brand-word">TOMATE</span></div>
     <div class="row" style="gap:6px">
       ${statusChip()}
+      ${S.profile ? `<button class="icon-btn notif-btn" data-act="nav" data-route="#/notifications" aria-label="Notifications">${ICON.bell}${S.unread > 0 ? `<span class="notif-badge">${S.unread > 9 ? '9+' : S.unread}</span>` : ''}</button>` : ''}
       <button class="icon-btn" data-act="nav" data-route="#/search" aria-label="Rechercher">${ICON.search}</button>
       ${actions}
     </div>
@@ -282,6 +294,7 @@ function welcomeView() {
   return `${topbar({ actions: '' })}
   <div class="card" style="padding:22px">
     <h1>Bienvenue</h1>
+    ${S.lastError ? notice(S.lastError, 'error', true) : ''}
     <p class="muted">TOMATE fonctionne <strong>avec ou sans connexion</strong>. Hors ligne, votre compte est créé sur cet appareil et relié automatiquement au réseau dès qu'Internet revient.</p>
     ${notice(ONLINE() ? 'Connexion disponible : votre pseudo sera vérifié en ligne.' : "Aucun réseau : le compte sera local. Tout fonctionnera, l'envoi attendra la connexion.", ONLINE() ? 'info' : 'warning')}
     <form data-form="onboarding" class="col" style="margin-top:14px">
@@ -307,8 +320,22 @@ function welcomeView() {
         </select>
       </div>
       <button class="btn btn-primary btn-block" type="submit">Créer mon compte</button>
-      <p class="hint">Aucune adresse e-mail demandée. Le pseudo ne prouve pas l'identité : la récupération sur un autre appareil n'est pas encore disponible.</p>
+      <p class="hint">Aucune adresse e-mail demandée pour commencer. Vous pourrez protéger le compte ensuite dans les paramètres, pour le retrouver sur un autre appareil.</p>
     </form>
+    <details class="signin">
+      <summary>J'ai déjà un compte</summary>
+      <form data-form="signin" class="col" style="margin-top:10px">
+        <div class="field">
+          <label for="signin-email">E-mail du compte</label>
+          <input class="input" id="signin-email" name="email" type="email" required placeholder="vous@exemple.fr" autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="signin-password">Mot de passe</label>
+          <input class="input" id="signin-password" name="password" type="password" required placeholder="Votre mot de passe" autocomplete="current-password" />
+        </div>
+        <button class="btn btn-soft btn-block" type="submit">Se connecter</button>
+      </form>
+    </details>
   </div>`;
 }
 
@@ -2004,7 +2031,7 @@ async function editProfile() {
 async function signOut() {
   const ok = await confirmDialog({
     title: 'Se déconnecter ?',
-    text: 'La session, le profil et toutes les données locales (publications en attente, caches) seront supprimés de cet appareil. Sans code de récupération, le compte ne pourra pas être restauré.',
+    text: 'La session, le profil et toutes les données locales (publications en attente, caches) seront supprimés de cet appareil. Sans e-mail et mot de passe, le compte ne pourra pas être restauré.',
     confirmLabel: 'Se déconnecter',
     danger: true,
   });
@@ -2019,6 +2046,10 @@ async function signOut() {
   S.communities = [];
   S.comments = [];
   S.weather = null;
+  S.notifications = [];
+  S.unread = 0;
+  S.notificationsReady = null;
+  S.authEmail = '';
   S.queue = 0;
   S.route = 'welcome';
   location.hash = '#/welcome';
@@ -2049,8 +2080,30 @@ function settingsView() {
     </div>
 
     <div class="card">
+      <h2 style="margin-bottom:10px">Compte et récupération</h2>
+      ${S.authEmail
+        ? `<p class="small">Compte protégé par <strong>${esc(S.authEmail)}</strong>. Sur un autre appareil, « J'ai déjà un compte » avec cet e-mail et votre mot de passe restaure ce compte et ses données.</p>
+           <button class="btn btn-soft btn-block" data-act="nav" data-route="#/profile">Voir mon profil</button>`
+        : `<p class="small muted">Votre compte est anonyme : s'il est perdu, il l'est définitivement. Ajoutez un e-mail et un mot de passe pour le retrouver sur un autre appareil.</p>
+           <form data-form="secure-account" class="col">
+             <div class="field">
+               <label for="secure-email">E-mail de connexion</label>
+               <input class="input" id="secure-email" name="email" type="email" required placeholder="vous@exemple.fr" autocomplete="email" />
+             </div>
+             <div class="field">
+               <label for="secure-password">Mot de passe (8 caractères minimum)</label>
+               <input class="input" id="secure-password" name="password" type="password" required minlength="8" placeholder="Mot de passe" autocomplete="new-password" />
+             </div>
+             <button class="btn btn-primary btn-block" type="submit">Protéger mon compte</button>
+           </form>
+           <p class="hint">Cet e-mail sert d'identifiant de connexion ; aucun message ne vous sera envoyé.</p>`}
+    </div>
+
+    <div class="card">
       <h2 style="margin-bottom:10px">Notifications et stockage</h2>
-      <div class="settings-row"><div><strong>Notifications</strong><div class="tiny muted">Autorisation demandée au moment de l'action</div></div>
+      <div class="settings-row"><div><strong>Notifications</strong><div class="tiny muted">${S.unread > 0 ? `${S.unread} non lue(s)` : 'Messages, réactions et adhésions'}</div></div>
+        <button class="btn btn-soft" data-act="nav" data-route="#/notifications">Ouvrir</button></div>
+      <div class="settings-row"><div><strong>Test local</strong><div class="tiny muted">Autorisation demandée au moment de l'action</div></div>
         <button class="btn btn-soft" data-act="notify-test" ${caps.notifications ? '' : 'disabled'}>Tester</button></div>
       <div class="settings-row"><div><strong>Stockage</strong><div class="tiny muted">${S.storage ? `${S.storage.usageMb} Mo utilisés sur ${S.storage.quotaMb} Mo` : 'estimation indisponible'}</div></div>
         <button class="btn btn-soft" data-act="storage">Estimer</button></div>
@@ -2063,9 +2116,9 @@ function settingsView() {
       <ul class="small muted" style="padding-left:18px;line-height:1.6">
         <li>Pas de mesh BLE / Wi-Fi Direct ni de relais en arrière-plan dans un navigateur : l'app Android reste la référence.</li>
         <li>Chiffrement de bout en bout : absent. Aucun libellé ne le prétend.</li>
-        <li>Récupération de compte : non disponible, aucun code ne fonctionne encore.</li>
+        <li>Récupération : possible avec l'e-mail et le mot de passe ajoutés ici ; sans eux, un compte anonyme est perdu avec l'appareil.</li>
         <li>Météo : Open-Meteo, mise en cache datée.</li>
-        <li>Aucune notification push : seulement des notifications locales.</li>
+        <li>Notifications : visibles dans l'application (écrites par le serveur). L'alerte sur un appareil fermé (Web Push / FCM) n'est pas encore activée.</li>
       </ul>
     </div>
 
@@ -2160,6 +2213,108 @@ async function refreshCounts() {
   }
 }
 
+// -------------------------------------------------------------- notifications
+
+/**
+ * Notifications are written by the server (0007): the client only reads them.
+ * An older backend without the table answers 404, which is reported honestly.
+ */
+async function loadNotifications() {
+  if (!S.profile || S.session?.local || !ONLINE()) return;
+  const before = S.unread;
+  try {
+    const rows = (await rest('notifications', { query: 'select=*&order=created_at.desc&limit=40' })) ?? [];
+    S.notifications = rows;
+    S.unread = rows.filter((row) => !row.read_at).length;
+    S.notificationsReady = true;
+    S.notificationsError = null;
+    const ids = [...new Set(rows.map((row) => row.actor_id).filter(Boolean))];
+    if (ids.length) {
+      const profiles = (await rest('profiles', {
+        query: `select=id,handle,display_name&id=in.(${ids.join(',')})`,
+      })) ?? [];
+      S.notifActors = Object.fromEntries(profiles.map((p) => [p.id, p]));
+    }
+  } catch (error) {
+    S.notificationsReady = false;
+    S.notificationsError = error instanceof HttpError && error.status === 404
+      ? 'Notifications pas encore activées : appliquez la migration 0007_compte_notifications.sql.'
+      : humanError(error);
+  }
+  if (S.route === 'notifications' || S.unread !== before) render();
+}
+
+async function markNotificationsRead() {
+  if (!S.notifications.some((row) => !row.read_at)) return;
+  try {
+    await rest('notifications', {
+      method: 'PATCH',
+      query: 'read_at=is.null',
+      body: { read_at: new Date().toISOString() },
+    });
+  } catch (error) {
+    return toast(humanError(error));
+  }
+  const now = new Date().toISOString();
+  S.notifications = S.notifications.map((row) => ({ ...row, read_at: row.read_at ?? now }));
+  S.unread = 0;
+  render();
+}
+
+const NOTIF_LABEL = {
+  message: 'vous a envoyé un message',
+  reaction: 'a réagi à votre publication',
+  comment: 'a commenté votre publication',
+  join: 'groupe',
+  story: 'a publié une story',
+  system: 'information',
+};
+
+function notifRoute(row) {
+  if (row.kind === 'message' && row.conversation_id) return `#/chat/${row.conversation_id}`;
+  if ((row.kind === 'reaction' || row.kind === 'comment') && row.entity_id) return `#/post/${row.entity_id}`;
+  if (row.kind === 'join' && row.entity_id) return `#/community/${row.entity_id}`;
+  return null;
+}
+
+function notificationsView() {
+  if (S.notificationsError) {
+    return shell(`${notice(S.notificationsError, 'warning')}
+      <div class="card"><p class="small muted">Le serveur crée ces notifications automatiquement à chaque message, réaction, commentaire ou demande d'adhésion. Aucune n'est inventée côté client.</p></div>`,
+    { title: 'Notifications', back: '#/feed' });
+  }
+  if (S.notificationsReady === null) {
+    return shell(`<div class="card"><p class="muted">Chargement…</p></div>`, { title: 'Notifications', back: '#/feed' });
+  }
+  if (S.notifications.length === 0) {
+    return shell(`${emptyState('🔔', 'Aucune notification.', "Messages, réactions, commentaires et demandes d'adhésion apparaîtront ici.")}`,
+      { title: 'Notifications', back: '#/feed' });
+  }
+  return shell(`
+    <div class="row-between" style="margin:4px 2px 12px">
+      <span class="small muted">${S.unread > 0 ? `${S.unread} non lue(s)` : 'Tout est lu'}</span>
+      ${S.unread > 0 ? '<button class="btn-link" data-act="mark-read">Tout marquer comme lu</button>' : ''}
+    </div>
+    <div class="card" style="padding:4px 12px">
+      ${S.notifications.map((row) => {
+        const actor = S.notifActors[row.actor_id];
+        const route = notifRoute(row);
+        const name = actor?.display_name || actor?.handle || 'Quelqu\'un';
+        const inner = `<span class="avatar sm">${initials(name)}</span>
+          <div class="grow">
+            <div class="small"><strong>${esc(name)}</strong> ${esc(NOTIF_LABEL[row.kind] ?? '')}</div>
+            ${row.body ? `<div class="tiny muted notif-body">${esc(row.body)}</div>` : ''}
+            <div class="tiny muted">${esc(fmtDate(row.created_at))}</div>
+          </div>
+          ${row.read_at ? '' : '<span class="dot-unread" aria-label="Non lue"></span>'}`;
+        return route
+          ? `<a class="settings-row notif-row ${row.read_at ? '' : 'unread'}" href="${route}">${inner}</a>`
+          : `<div class="settings-row notif-row ${row.read_at ? '' : 'unread'}">${inner}</div>`;
+      }).join('')}
+    </div>
+  `, { title: 'Notifications', back: '#/feed' });
+}
+
 // ------------------------------------------------------------------- routage
 
 function parseRoute() {
@@ -2217,6 +2372,10 @@ async function navigate() {
       await refreshCounts();
       await renderQueue();
       break;
+    case 'notifications':
+      render();
+      await loadNotifications();
+      break;
     case 'profile':
     case 'settings':
       render();
@@ -2240,6 +2399,7 @@ function view() {
     case 'search': return searchView();
     case 'network': return networkView();
     case 'weather': return weatherView();
+    case 'notifications': return notificationsView();
     case 'profile': return profileView();
     case 'settings': return settingsView();
     default: return feedView();
@@ -2293,6 +2453,9 @@ document.addEventListener('click', async (event) => {
         await Promise.all([loadFeed({ refresh: true }), loadStories({ refresh: true })]);
         await syncNow({ silent: true });
         render();
+        break;
+      case 'mark-read':
+        await markNotificationsRead();
         break;
       case 'story-new': {
         const draft = await storyComposer();
@@ -2543,6 +2706,37 @@ document.addEventListener('submit', async (event) => {
         await sendMessage(form.dataset.conversation, String(data.get('body') ?? ''));
         form.reset();
         break;
+      case 'signin': {
+        const email = String(data.get('email') ?? '').trim().toLowerCase();
+        const password = String(data.get('password') ?? '');
+        if (!email || !password) throw new Error('E-mail et mot de passe obligatoires.');
+        const session = await signInWithPassword(email, password);
+        S.session = session;
+        const profile = await fetchMyProfile();
+        if (!profile) throw new Error("Ce compte n'a pas encore de profil TOMATE sur ce serveur.");
+        S.profile = profile;
+        S.authEmail = session.email ?? email;
+        await setItem('kv', 'profile', profile);
+        toast('Compte restauré sur cet appareil.');
+        location.hash = '#/feed';
+        S.route = 'feed';
+        await navigate();
+        break;
+      }
+      case 'secure-account': {
+        const email = String(data.get('email') ?? '').trim().toLowerCase();
+        const password = String(data.get('password') ?? '');
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Adresse e-mail invalide.');
+        if (password.length < 8) throw new Error('Mot de passe : 8 caractères minimum.');
+        const user = await attachCredentials(email, password);
+        const keptEmail = user.email ?? email;
+        await rememberEmail(keptEmail);
+        S.session = { ...S.session, email: keptEmail };
+        S.authEmail = keptEmail;
+        toast('Compte protégé : connectez-vous avec cet e-mail sur un autre appareil.');
+        render();
+        break;
+      }
       case 'city': {
         const city = String(data.get('city') ?? '').trim();
         if (!city) return;
@@ -2588,6 +2782,10 @@ window.addEventListener('beforeinstallprompt', (event) => {
 window.addEventListener('hashchange', () => navigate());
 
 // A 24-hour story must disappear on screen at the right minute, not only on next launch.
+setInterval(() => {
+  if (S.profile && navigator.onLine) loadNotifications();
+}, 45_000);
+
 setInterval(async () => {
   const alive = S.stories.filter(storyAlive);
   if (alive.length === S.stories.length) return;
@@ -2600,6 +2798,7 @@ async function boot() {
   try {
     await applyTheme(await getItem('kv', 'theme'));
     S.session = await ensureActor();
+    S.authEmail = S.session?.email ?? '';
     S.profile = await getItem('kv', 'profile');
     S.weather = await cachedWeather();
     const cachedFeed = await cacheGet('feed');
@@ -2618,6 +2817,7 @@ async function boot() {
     if (!S.profile) S.route = 'welcome';
     await navigate();
     if (navigator.onLine) await syncNow({ silent: true });
+    if (S.profile) await loadNotifications();
   }
 }
 

@@ -122,3 +122,18 @@ refusée par la RLS (403) et n'offrait aucun composeur dans le groupe. Les deux 
 5. Notifications push, médias dans les messages, puis modération.
 
 Rien de cette liste n'est présenté comme fait dans l'application.
+
+## Mise à jour 0.1.7 (9 novembre 2026)
+
+| Fonction | État | Dépendance | Preuve |
+|---|---|---|---|
+| Photo/vidéo dans une publication (PWA) | **testée** | `0006` appliquée | upload 200, fil serveur, image affichée |
+| Photo/vidéo dans une story (PWA) | **testée** | `0005` appliquée | story visible par un second compte |
+| Liste des membres d'un groupe public | **testée** | `0006` appliquée | visible par un tiers |
+| Demande d'adhésion à un groupe privé | **testée** | `0006` appliquée | `Pending` accepté, `Active` refusé |
+| Protection du compte (e-mail + mot de passe) | **testée** | aucune migration | même identifiant après connexion par mot de passe |
+| Restauration sur un autre appareil | **testée** | aucune migration | second stockage → compte restauré |
+| Centre de notifications (dans l'app) | **code livré**, écran honnête tant que `0007` n'est pas appliquée | `0007` | message de repli vérifié |
+| Notifications push Android (FCM) | **code + build**, envoi non testé | `0007`, projet Firebase, fonction Edge déployée | `assembleDebug` OK, guide `docs/10` |
+| Web Push (navigateur fermé) | **non implémenté** | clés VAPID + envoi | — |
+| Notifications push Android | **non testées** sur appareil | téléphone + Firebase | — |

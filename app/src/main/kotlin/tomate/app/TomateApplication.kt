@@ -1,6 +1,7 @@
 package tomate.app
 
 import android.app.Application
+import tomate.app.notifications.PushRegistrar
 import tomate.data.container.TomateContainer
 
 /**
@@ -14,6 +15,9 @@ class TomateApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        PushRegistrar.ensureChannel(this)
+        // No-op until app/google-services.json exists: see docs/10_PUSH_FIREBASE.md.
+        PushRegistrar.requestToken(this)
     }
 
     companion object {

@@ -51,6 +51,9 @@ ordre**, en collant l'intégralité du contenu de chaque fichier (jamais son che
 6. [`supabase/migrations/0006_social.sql`](../supabase/migrations/0006_social.sql)
    — photos et vidéos dans les publications, bucket `posts`, fil étendu (média, communauté),
    liste des membres d'un groupe public, adhésion honnête (public = actif, privé = demande).
+7. [`supabase/migrations/0007_compte_notifications.sql`](../supabase/migrations/0007_compte_notifications.sql)
+   — notifications persistantes (messages, réactions, commentaires, adhésions), abonnements
+   Web Push et jetons FCM. Déclencheurs serveur : le client ne crée jamais de notification.
 
 Dans l'éditeur GitHub, le bouton **Copier** en haut à droite du fichier copie le contenu
 exact ; c'est ce contenu qu'il faut coller.
@@ -223,3 +226,23 @@ select id, public, file_size_limit from storage.buckets where id = 'posts';
 
 Puis, dans l'application : publier une photo depuis le fil, la voir apparaître chez un second
 compte, et vérifier la liste des membres d'un groupe public.
+
+## Migration 0007 — notifications et appareils
+
+`supabase/migrations/0007_compte_notifications.sql` :
+
+1. table `notifications` (destinataire, acteur, type, extrait, lu/non lu) avec RLS personnelle ;
+2. déclencheurs serveur : nouveau message, réaction, commentaire, demande d'adhésion et
+   acceptation d'une demande ;
+3. table `push_subscriptions` (Web Push, prête) et `device_tokens` (FCM Android), toutes deux
+   limitées à leur propriétaire par RLS ;
+4. aucune politique d'insertion sur `notifications` : seuls les déclencheurs écrivent.
+
+Vérification :
+
+```sql
+select count(*) from public.notifications;
+select user_id, platform from public.device_tokens;
+```
+
+L'envoi vers un téléphone est décrit dans `docs/10_PUSH_FIREBASE.md`.
