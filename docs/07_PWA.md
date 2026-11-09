@@ -41,7 +41,9 @@ Client web de TOMATE : installable, hors ligne après le premier chargement, bra
 | Récupération de compte par code | **absente** |
 | Notifications push | **absentes** (notifications locales seulement) |
 | Appels audio/vidéo | **absents** |
-| Stories | **testées en ligne** : création **201**, visible par un autre compte, vue enregistrée, story écrite hors ligne envoyée à la reconnexion, suppression par l'auteur. Bandeau, visionneuse 24 h, composeur. |
+| Stories | **testées en ligne** : création **201**, visible par un autre compte, vue enregistrée, story écrite hors ligne envoyée à la reconnexion, suppression par l'auteur. Bandeau, visionneuse 24 h, composeur, **photo/vidéo** (nécessite `0005_media_reseau.sql`). |
+| Ajout par QR | QR personnel généré, scan caméra si `BarcodeDetector`, lien collé, conversation créée même hors ligne. |
+| Flammes 🔥 | Jours consécutifs où les deux ont écrit, calculés depuis les messages, affichés hors ligne. |
 | Événements, cartes hors ligne | **non portés** (itérations futures) |
 
 Les permissions ne sont demandées qu'au moment de l'action, avec l'explication affichée à côté.

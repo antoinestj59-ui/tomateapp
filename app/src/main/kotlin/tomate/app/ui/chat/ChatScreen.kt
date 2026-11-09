@@ -62,7 +62,11 @@ fun ChatScreen(
             title = {
                 Column {
                     Text(
-                        text = state.conversation?.title ?: "Conversation",
+                        text = buildString {
+                            append(state.conversation?.title ?: "Conversation")
+                            val streak = state.conversation?.streak ?: 0
+                            if (streak > 0) append(" · 🔥 $streak")
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

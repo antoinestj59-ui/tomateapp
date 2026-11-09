@@ -9,6 +9,7 @@ import tomate.core.model.Outcome
 import tomate.core.model.Story
 import tomate.data.backend.SessionManager
 import tomate.data.backend.SupabaseApi
+import tomate.data.backend.SupabaseConfig
 import tomate.data.backend.dto.StoryInsert
 import tomate.data.backend.dto.StoryRowDto
 import tomate.data.backend.dto.StoryViewInsert
@@ -68,10 +69,27 @@ class StoryRepository(
         }
     }
 
-    suspend fun create(body: String, background: String): Outcome<Story> {
+    /**
+     * Creates a story, optionally with a photo or a video.
+     *
+     * The media is uploaded before the row is written: publishing a row that points to a missing
+     * object would show a broken story to everyone. When the upload fails nothing is queued,
+     * because the bytes cannot be replayed from the outbox later.
+     */
+    suspend fun create(
+        body: String,
+        background: String,
+        media: ByteArray? = null,
+        mediaType: String? = null,
+        mimeType: String? = null,
+        extension: String = "jpg",
+    ): Outcome<Story> {
         val trimmed = body.trim()
-        if (trimmed.isEmpty()) {
+        if (trimmed.isEmpty() && media == null) {
             return Outcome.Failure(AppError.Validation("empty_story", "Votre story est vide."))
+        }
+        if (media != null && mediaType !in setOf("image", "video")) {
+            return Outcome.Failure(AppError.Validation("story_media", "Média inconnu."))
         }
         if (trimmed.length > MAX_STORY_LENGTH) {
             return Outcome.Failure(
@@ -84,6 +102,21 @@ class StoryRepository(
         val profile = profileDao.byId(userId)
         val now = clock()
         val storyId = UUID.randomUUID().toString()
+        var mediaPath: String? = null
+        if (media != null) {
+            if (SessionManager.isLocalId(userId)) {
+                return Outcome.Failure(
+                    AppError.Offline("Photo et vidéo : connexion requise"),
+                )
+            }
+            val path = "$userId/$storyId.$extension"
+            when (val uploaded = api.uploadObject("stories", path, media, mimeType ?: "image/jpeg")) {
+                is Outcome.Failure -> return Outcome.Failure(
+                    AppError.Unknown("Envoi du média impossible : vérifiez la connexion."),
+                )
+                is Outcome.Success -> mediaPath = path
+            }
+        }
         val entity = StoryEntity(
             id = storyId,
             authorId = userId,
@@ -95,12 +128,21 @@ class StoryRepository(
             expiresAt = now + TTL_MS,
             viewedByMe = true,
             pendingSync = true,
+            mediaPath = mediaPath,
+            mediaType = if (mediaPath != null) mediaType else null,
         )
         storyDao.upsert(entity)
 
         val payload = SupabaseApi.json.encodeToString(
             StoryInsert.serializer(),
-            StoryInsert(id = storyId, authorId = userId, body = trimmed, background = palette),
+            StoryInsert(
+                id = storyId,
+                authorId = userId,
+                body = trimmed,
+                background = palette,
+                mediaPath = mediaPath,
+                mediaType = if (mediaPath != null) mediaType else null,
+            ),
         )
         if (SessionManager.isLocalId(userId)) {
             enqueue("story_insert", storyId, payload)
@@ -168,6 +210,13 @@ class StoryRepository(
 
     /** Server timestamp of the expiry, for a story that exists locally only. */
     fun localExpiry(createdAt: Long): Long = createdAt + TTL_MS
+
+    /** Public URL of a story medium, or null when the story is text-only. */
+    fun mediaUrl(path: String?): String? {
+        if (path.isNullOrBlank()) return null
+        val encoded = path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        return "${SupabaseConfig.url}/storage/v1/object/public/stories/$encoded"
+    }
 
     private suspend fun enqueue(kind: String, key: String, payload: String) {
         val now = clock()

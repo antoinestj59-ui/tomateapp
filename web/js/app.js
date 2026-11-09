@@ -6,6 +6,7 @@ import {
   ensureRemoteSession,
   getSession,
   handleAvailable,
+  isLocalId,
   linkLocalAccount,
   rest,
   signUpAnonymous,
@@ -33,6 +34,8 @@ import {
   MAX_MESSAGE_LENGTH,
   MAX_POST_LENGTH,
   MAX_STORY_LENGTH,
+  SUPABASE_KEY,
+  SUPABASE_URL,
 } from './config.js';
 
 const app = document.getElementById('app');
@@ -53,6 +56,7 @@ const S = {
   comments: [],
   conversations: [],
   messages: [],
+  streaks: {},
   communities: [],
   memberships: new Set(),
   weather: null,
@@ -195,6 +199,7 @@ const ICON = {
   refresh: svg('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>'),
   settings: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>'),
   back: svg('<path d="M15 18l-6-6 6-6"/>'),
+  qr: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v2M14 20h2M18 18h3v3h-3z"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   download: svg('<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/>'),
   weather: svg('<circle cx="8" cy="8" r="3"/><path d="M8 2v1.5M2 8h1.5M3.8 3.8l1 1M12.2 3.8l-1 1"/><path d="M9 19h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.4 1.5A3.5 3.5 0 0 0 9 19Z"/>'),
@@ -501,6 +506,69 @@ async function loadStories({ refresh = false } = {}) {
 
 const STORY_BACKGROUNDS = ['sunset', 'ocean', 'forest', 'night', 'plain'];
 
+const STORY_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
+const STORY_VIDEO_MAX_BYTES = 25 * 1024 * 1024;
+
+function storyMediaUrl(path) {
+  const encoded = String(path ?? '').split('/').map(encodeURIComponent).join('/');
+  return `${SUPABASE_URL}/storage/v1/object/public/stories/${encoded}`;
+}
+
+async function compressStoryImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1440 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Compression de la photo impossible.'))),
+      'image/jpeg',
+      0.82,
+    );
+  });
+}
+
+/** Phrase a picked file into something the story bucket accepts, or explain why not. */
+async function prepareStoryMedia(file) {
+  if (!file) return null;
+  if (file.type.startsWith('image/')) {
+    if (file.size > STORY_IMAGE_MAX_BYTES) throw new Error('Photo trop lourde : 12 Mo maximum.');
+    const blob = await compressStoryImage(file);
+    return { blob, type: 'image', mime: 'image/jpeg', ext: 'jpg', preview: URL.createObjectURL(blob) };
+  }
+  if (file.type.startsWith('video/')) {
+    if (file.size > STORY_VIDEO_MAX_BYTES) throw new Error('Vidéo trop lourde : 25 Mo maximum.');
+    const ext = file.type.includes('webm') ? 'webm' : file.type.includes('quicktime') ? 'mov' : 'mp4';
+    return { blob: file, type: 'video', mime: file.type, ext, preview: URL.createObjectURL(file) };
+  }
+  throw new Error('Format non pris en charge : photo ou vidéo uniquement.');
+}
+
+async function uploadStoryMedia(path, media) {
+  const session = await ensureRemoteSession();
+  if (!session) throw new Error('Connexion requise pour envoyer une photo ou une vidéo.');
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/stories/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': media.mime,
+      'x-upsert': 'false',
+    },
+    body: media.blob,
+  });
+  if (!response.ok) {
+    // 400/404 here almost always means the `stories` bucket is missing (migration 0005).
+    const hint = response.status === 400 || response.status === 404
+      ? 'Stockage photo/vidéo non activé : appliquez la migration 0005_media_reseau.sql.'
+      : `Envoi du média refusé (HTTP ${response.status}).`;
+    throw new Error(hint);
+  }
+}
+
 function showStoryViewer(story) {
   const dialog = document.createElement('dialog');
   dialog.className = 'story-dialog';
@@ -515,6 +583,11 @@ function showStoryViewer(story) {
         ${mine ? `<button class="icon-btn" data-act="story-delete" data-id="${esc(story.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
         <button class="icon-btn" data-act="story-close" aria-label="Fermer">${ICON.close}</button>
       </div>
+      ${story.media_path
+        ? story.media_type === 'video'
+          ? `<video class="story-media" src="${esc(storyMediaUrl(story.media_path))}" controls autoplay playsinline loop></video>`
+          : `<img class="story-media" src="${esc(storyMediaUrl(story.media_path))}" alt="Story de ${esc(story.author_handle ?? '')}">`
+        : ''}
       <div class="story-text" data-story-body="${esc(story.id)}"></div>
       <div class="story-foot">Disparaît automatiquement 24 h après sa publication.</div>
     </div>`;
@@ -554,6 +627,11 @@ function storyComposer() {
         <label for="story-text">Texte de la story</label>
         <textarea class="textarea" id="story-text" maxlength="${MAX_STORY_LENGTH}" placeholder="Ce que vous voulez partager aujourd'hui…"></textarea>
       </div>
+      <div class="field" style="margin-top:10px">
+        <label for="story-file">Photo ou vidéo (facultatif)</label>
+        <input class="input" id="story-file" type="file" accept="image/*,video/*">
+        <div class="tiny muted" id="story-file-info">Photo jusqu'à 12 Mo, vidéo jusqu'à 25 Mo. Envoi avec connexion.</div>
+      </div>
       <div class="story-palette" role="group" aria-label="Fond de la story">
         ${STORY_BACKGROUNDS.map((bg) => `<button type="button" class="story-swatch bg-${bg} ${bg === 'sunset' ? 'active' : ''}" data-bg="${bg}" aria-label="Fond ${bg}" aria-pressed="${bg === 'sunset'}"></button>`).join('')}
       </div>
@@ -565,8 +643,31 @@ function storyComposer() {
     dialog.showModal();
     const text = dialog.querySelector('#story-text');
     const preview = dialog.querySelector('#story-preview');
+    const fileInput = dialog.querySelector('#story-file');
+    const fileInfo = dialog.querySelector('#story-file-info');
     text.focus();
     let background = 'sunset';
+    let media = null;
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      fileInput.disabled = true;
+      fileInfo.textContent = 'Préparation du média…';
+      try {
+        media = await prepareStoryMedia(file);
+        preview.innerHTML = media.type === 'video'
+          ? `<video class="story-media" src="${media.preview}" muted playsinline autoplay loop></video>`
+          : `<img class="story-media" src="${media.preview}" alt="Aperçu de la story">`;
+        preview.classList.remove('placeholder');
+        fileInfo.textContent = media.type === 'video' ? 'Vidéo prête à envoyer.' : 'Photo compressée, prête à envoyer.';
+      } catch (error) {
+        media = null;
+        fileInput.value = '';
+        fileInfo.textContent = error.message;
+      } finally {
+        fileInput.disabled = false;
+      }
+    });
     text.addEventListener('input', () => {
       preview.textContent = text.value.trim() || 'Votre texte…';
       preview.classList.toggle('placeholder', !text.value.trim());
@@ -586,14 +687,14 @@ function storyComposer() {
       const choice = event.target.closest('[data-choice]')?.dataset.choice;
       if (!choice) return;
       const value = text.value.trim();
-      dialog.close();
-      dialog.remove();
-      if (choice === 'ok' && !value) {
-        toast("Écrivez d'abord un texte.");
-        resolve(null);
+      if (choice === 'ok' && !value && !media) {
+        toast('Écrivez un texte ou choisissez une photo.');
         return;
       }
-      resolve(choice === 'ok' ? { text: value, background } : null);
+      dialog.close();
+      dialog.remove();
+      if (media?.preview && choice !== 'ok') URL.revokeObjectURL(media.preview);
+      resolve(choice === 'ok' ? { text: value, background, media } : null);
     });
     dialog.addEventListener('cancel', () => {
       dialog.remove();
@@ -602,29 +703,58 @@ function storyComposer() {
   });
 }
 
-async function publishStory(body, background) {
-  const text = String(body ?? '').trim();
-  if (!text) return;
+async function publishStory(draft = {}) {
+  const body = String(draft.text ?? '').trim().slice(0, MAX_STORY_LENGTH);
+  const media = draft.media ?? null;
+  if (!body && !media) return;
   const story = {
     id: crypto.randomUUID(),
     author_id: S.profile.id,
     author_handle: S.profile.handle,
     author_display_name: S.profile.display_name,
-    body: text.slice(0, MAX_STORY_LENGTH),
-    background: STORY_BACKGROUNDS.includes(background) ? background : 'sunset',
+    body,
+    background: STORY_BACKGROUNDS.includes(draft.background) ? draft.background : 'sunset',
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + STORY_TTL_MS).toISOString(),
     viewed_by_me: true,
     pending: true,
+    media_path: null,
+    media_type: null,
   };
+  if (media) {
+    // A media story is uploaded first: publishing a row that points to a missing file would
+    // advertise a story nobody can open. Offline, the honest answer is "connexion requise".
+    if (!ONLINE() || !(await ensureRemoteSession())) {
+      toast('Photo et vidéo : connexion requise. Le texte, lui, part même hors ligne.');
+      return;
+    }
+    const path = `${S.profile.id}/${story.id}.${media.ext}`;
+    toast('Envoi du média…');
+    try {
+      await uploadStoryMedia(path, media);
+    } catch (error) {
+      S.lastError = error.message;
+      render();
+      return;
+    }
+    story.media_path = path;
+    story.media_type = media.type;
+  }
   S.stories = [story, ...S.stories];
   await cacheSet('stories', S.stories);
-  await enqueue('story_create', {
+  // Send the media columns only when the story has media: a text story must keep working
+  // before migration 0005 adds those columns.
+  const payload = {
     id: story.id,
     author_id: story.author_id,
     body: story.body,
     background: story.background,
-  });
+  };
+  if (story.media_path) {
+    payload.media_path = story.media_path;
+    payload.media_type = story.media_type;
+  }
+  await enqueue('story_create', payload);
   render();
   await syncNow();
 }
@@ -798,14 +928,17 @@ function messagesView() {
   return shell(`
     ${S.lastError ? notice(S.lastError, 'error', true) : ''}
     <div class="section-title"><h2>Conversations</h2>
-      <button class="btn btn-soft" data-act="new-conversation">${ICON.plus} Nouvelle</button>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-soft" data-act="qr-add">${ICON.qr} QR</button>
+        <button class="btn btn-soft" data-act="new-conversation">${ICON.plus} Nouvelle</button>
+      </div>
     </div>
     <div class="card" style="padding:4px 16px">
       ${S.conversations.length === 0
         ? emptyState('✉️', 'Aucune conversation.', 'Démarrez une discussion avec un pseudo TOMATE.')
         : S.conversations.map(conversationItem).join('')}
     </div>
-    ${notice("Les messages restent sur l'appareil et partent dès que le réseau le permet. Le chiffrement de bout en bout n'est pas encore implémenté : l'interface ne le prétend pas.", 'info')}
+    ${notice("Les messages restent sur l'appareil et partent dès que le réseau le permet. La flamme 🔥 compte les jours consécutifs où vous avez écrit tous les deux. Le chiffrement de bout en bout n'est pas encore implémenté : l'interface ne le prétend pas.", 'info')}
   `, { actions: `<button class="icon-btn" data-act="refresh-messages" aria-label="Actualiser">${ICON.refresh}</button>` });
 }
 
@@ -813,7 +946,8 @@ function conversationItem(conversation) {
   return `<button class="list-row" data-act="open-chat" data-id="${esc(conversation.id)}">
     <span class="avatar">${initials(conversation.title || 'Conversation')}</span>
     <span class="grow">
-      <span class="title">${esc(conversation.title || (conversation.is_group ? 'Groupe' : 'Conversation'))}</span>
+      <span class="title">${esc(conversation.title || (conversation.is_group ? 'Groupe' : 'Conversation'))}
+        ${S.streaks[conversation.id] ? `<span class="streak" title="Jours consécutifs à écrire tous les deux">🔥 ${S.streaks[conversation.id]}</span>` : ''}</span>
       <span class="sub">${fmtDate(conversation.last_message_at)}</span>
     </span>
   </button>`;
@@ -830,7 +964,7 @@ function chatView() {
       <textarea class="textarea" name="body" maxlength="${MAX_MESSAGE_LENGTH}" placeholder="Message…" aria-label="Message" style="min-height:52px"></textarea>
       <button class="icon-btn" type="submit" style="color:var(--primary);flex:none" aria-label="Envoyer">${ICON.send}</button>
     </form>
-  `, { title: conversation?.title || 'Conversation', back: '#/messages' });
+  `, { title: `${conversation?.title || 'Conversation'}${S.streaks[S.param] ? ` · 🔥 ${S.streaks[S.param]}` : ''}`, back: '#/messages' });
 }
 
 function messageItem(message) {
@@ -853,9 +987,28 @@ async function loadConversations({ refresh = false } = {}) {
     if (ids.length === 0) {
       S.conversations = [];
     } else {
-      S.conversations = await rest('conversations', {
+      const conversations = await rest('conversations', {
         query: `select=*&id=in.(${ids.join(',')})&order=last_message_at.desc&limit=50`,
       });
+      // The peer of a direct conversation is not a column: it is the other member. Cached
+      // so the QR flow can recognise an existing conversation without asking the server.
+      let peerByConversation = new Map();
+      try {
+        const members = await rest('conversation_members', {
+          query: `select=conversation_id,user_id&conversation_id=in.(${ids.join(',')})`,
+        });
+        peerByConversation = new Map(
+          members
+            .filter((m) => m.user_id !== session.userId)
+            .map((m) => [m.conversation_id, m.user_id]),
+        );
+      } catch {
+        // Peer ids are a convenience; the list still works without them.
+      }
+      S.conversations = conversations.map((conversation) => ({
+        ...conversation,
+        peer_id: conversation.peer_id ?? peerByConversation.get(conversation.id) ?? null,
+      }));
     }
     await cacheSet('conversations', S.conversations);
   } catch (error) {
@@ -938,6 +1091,222 @@ async function newConversation() {
   } catch (error) {
     S.lastError = humanError(error);
     render();
+  }
+}
+
+// ------------------------------------------------------------ ajout par QR code
+
+const FRIEND_SCHEME = 'tomato://add';
+
+function friendPayload() {
+  const params = new URLSearchParams({
+    u: S.profile.id,
+    h: S.profile.handle ?? '',
+    n: S.profile.display_name ?? '',
+  });
+  return `${FRIEND_SCHEME}?${params.toString()}`;
+}
+
+/** Accepts a tomato:// payload, a pasted link, or an https URL carrying the same query. */
+function parseFriendPayload(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  const normalised = text.replace(/^tomato:\/\//i, 'https://tomate.local/');
+  let url;
+  try {
+    url = new URL(normalised);
+  } catch {
+    return null;
+  }
+  const id = url.searchParams.get('u');
+  if (!id || !/^[A-Za-z0-9-]{3,64}$/.test(id)) return null;
+  return {
+    id,
+    handle: (url.searchParams.get('h') ?? '').replace(/^@/, '').slice(0, 20),
+    name: (url.searchParams.get('n') ?? '').slice(0, 40),
+  };
+}
+
+async function addFriendFromText(raw) {
+  const peer = parseFriendPayload(raw);
+  if (!peer) return toast('Ce code ne contient pas une invitation TOMATE.');
+  if (peer.id === S.profile.id) return toast("C'est votre propre code.");
+  await createConversationWith(peer);
+  toast(`Conversation avec @${peer.handle || peer.name || 'ce compte'} prête.`);
+}
+
+function qrDialog() {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'qr-dialog';
+  dialog.innerHTML = `
+    <h2>Ajouter un ami</h2>
+    <p class="muted small">Scannez le code de votre ami, ou faites scanner le vôtre. La conversation est créée même sans réseau : elle partira à la reconnexion.</p>
+    <div class="qr-code" data-qr-code></div>
+    <div class="tiny muted" style="text-align:center">@${esc(S.profile.handle ?? '')}</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn-soft" data-act="qr-copy">Copier le lien</button>
+      <button class="btn btn-soft" data-act="qr-scan">Scanner</button>
+    </div>
+    <div class="field" style="margin-top:10px">
+      <label for="qr-link">Lien ou code reçu</label>
+      <input class="input" id="qr-link" placeholder="tomato://add?u=…&amp;h=…">
+    </div>
+    <video data-qr-video class="qr-video" playsinline muted hidden></video>
+    <div class="tiny muted" data-qr-status></div>
+    <div class="row">
+      <button class="btn btn-soft" data-choice="cancel">Fermer</button>
+      <button class="btn btn-primary" data-act="qr-open">Ouvrir</button>
+    </div>`;
+  document.body.appendChild(dialog);
+  const code = dialog.querySelector('[data-qr-code]');
+  const payload = friendPayload();
+  try {
+    const qr = qrcode(0, 'M');
+    qr.addData(payload);
+    qr.make();
+    code.innerHTML = qr.createImgTag(5, 8);
+  } catch {
+    code.textContent = 'QR indisponible : utilisez le bouton « Copier le lien ».';
+  }
+  const stop = () => {
+    dialog._stopScan?.();
+    dialog._stream?.getTracks().forEach((track) => track.stop());
+    dialog._stream = null;
+  };
+  dialog.addEventListener('close', stop);
+  dialog.addEventListener('cancel', stop);
+  dialog.addEventListener('click', (event) => {
+    if (event.target.closest('[data-choice="cancel"]') || event.target === dialog) {
+      dialog.close();
+      dialog.remove();
+    }
+  });
+  dialog.showModal();
+}
+
+async function scanFriendCode(dialog) {
+  const status = dialog.querySelector('[data-qr-status]');
+  const video = dialog.querySelector('[data-qr-video]');
+  if (!('BarcodeDetector' in window)) {
+    status.textContent = 'Scan caméra non pris en charge ici : collez le lien dans le champ.';
+    return;
+  }
+  try {
+    dialog._stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+    video.srcObject = dialog._stream;
+    video.hidden = false;
+    await video.play();
+  } catch (error) {
+    status.textContent = `Caméra indisponible (${error.message}). Collez le lien à la place.`;
+    return;
+  }
+  const detector = new BarcodeDetector({ formats: ['qr_code'] });
+  status.textContent = 'Visez le QR code…';
+  let stopped = false;
+  dialog._stopScan = () => {
+    stopped = true;
+  };
+  const tick = async () => {
+    if (stopped || !video.isConnected) return;
+    try {
+      const codes = await detector.detect(video);
+      const raw = codes?.[0]?.rawValue;
+      if (raw) {
+        dialog._stopScan?.();
+        dialog._stream?.getTracks().forEach((track) => track.stop());
+        dialog.close();
+        dialog.remove();
+        await addFriendFromText(raw);
+        return;
+      }
+    } catch {
+      // A frame can fail to decode (motion blur): keep scanning instead of aborting.
+    }
+    setTimeout(tick, 350);
+  };
+  tick();
+}
+
+async function createConversationWith(peer) {
+  const existing = S.conversations.find((c) => c.peer_id === peer.id);
+  if (existing) {
+    location.hash = `#/chat/${existing.id}`;
+    return;
+  }
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const conversation = {
+    id,
+    title: peer.name || peer.handle || 'Conversation',
+    is_group: false,
+    created_by: S.profile.id,
+    created_at: now,
+    last_message_at: now,
+    peer_id: peer.id,
+    pending: !ONLINE(),
+  };
+  S.conversations = [conversation, ...S.conversations];
+  await cacheSet('conversations', S.conversations);
+  await enqueue('conversation_create', { id, title: conversation.title, is_group: false, created_by: S.profile.id });
+  await enqueue('conversation_member_add', { conversation_id: id, user_id: S.profile.id });
+  if (!isLocalId(peer.id)) await enqueue('conversation_member_add', { conversation_id: id, user_id: peer.id });
+  render();
+  if (ONLINE()) await syncNow();
+  location.hash = `#/chat/${id}`;
+  await navigate();
+}
+
+// ------------------------------------------------------------- flammes 🔥
+// Une flamme compte les jours consécutifs où les deux personnes ont écrit. Calculée à
+// partir des messages réels : aucun compteur inventé, et elle reste juste hors ligne.
+
+const dayKey = (value) => {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const shiftDay = (key, delta) => {
+  const [year, month, day] = key.split('-').map(Number);
+  return dayKey(new Date(year, month - 1, day + delta));
+};
+
+function computeStreak(days) {
+  if (!days?.size) return 0;
+  const today = dayKey(new Date());
+  let cursor = (days.get(today)?.size ?? 0) >= 2 ? today : shiftDay(today, -1);
+  let count = 0;
+  while ((days.get(cursor)?.size ?? 0) >= 2) {
+    count += 1;
+    cursor = shiftDay(cursor, -1);
+  }
+  return count;
+}
+
+async function loadStreaks() {
+  const cached = await cacheGet('streaks');
+  if (cached && typeof cached === 'object') S.streaks = cached;
+  if (!ONLINE() || S.conversations.length === 0) return;
+  try {
+    const ids = S.conversations.map((c) => c.id).slice(0, 50);
+    const rows = await rest('messages', {
+      query: `select=conversation_id,sender_id,created_at&conversation_id=in.(${ids.join(',')})&order=created_at.desc&limit=2000`,
+    });
+    const perConversation = new Map();
+    rows.forEach((row) => {
+      if (!perConversation.has(row.conversation_id)) perConversation.set(row.conversation_id, new Map());
+      const days = perConversation.get(row.conversation_id);
+      const key = dayKey(row.created_at);
+      if (!days.has(key)) days.set(key, new Set());
+      days.get(key).add(row.sender_id);
+    });
+    const streaks = {};
+    ids.forEach((id) => {
+      streaks[id] = computeStreak(perConversation.get(id));
+    });
+    S.streaks = streaks;
+    await cacheSet('streaks', streaks);
+  } catch {
+    // Cached streaks stay displayed; a failed refresh must not erase them.
   }
 }
 
@@ -1494,10 +1863,12 @@ async function navigate() {
     case 'messages':
       render();
       await loadConversations({ refresh: true });
+      await loadStreaks();
       break;
     case 'chat':
       render();
       await loadMessages(S.param);
+      await loadStreaks();
       break;
     case 'communities':
       render();
@@ -1592,7 +1963,7 @@ document.addEventListener('click', async (event) => {
         break;
       case 'story-new': {
         const draft = await storyComposer();
-        if (draft) await publishStory(draft.text, draft.background);
+        if (draft) await publishStory(draft);
         break;
       }
       case 'story-open':
@@ -1614,8 +1985,32 @@ document.addEventListener('click', async (event) => {
       }
       case 'refresh-messages':
         await loadConversations({ refresh: true });
+        await loadStreaks();
         render();
         break;
+      case 'qr-add':
+        qrDialog();
+        break;
+      case 'qr-scan':
+        await scanFriendCode(trigger.closest('dialog'));
+        break;
+      case 'qr-copy':
+        try {
+          await navigator.clipboard.writeText(friendPayload());
+          toast('Lien copié.');
+        } catch {
+          toast('Copie impossible : sélectionnez le lien à la main.');
+        }
+        break;
+      case 'qr-open': {
+        const dialog = trigger.closest('dialog');
+        const value = dialog.querySelector('#qr-link')?.value ?? '';
+        if (!value.trim()) return toast('Collez un lien TOMATE.');
+        dialog.close();
+        dialog.remove();
+        await addFriendFromText(value);
+        break;
+      }
       case 'refresh-communities':
         await loadCommunities({ refresh: true });
         render();

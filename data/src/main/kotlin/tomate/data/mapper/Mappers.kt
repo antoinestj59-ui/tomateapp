@@ -53,6 +53,8 @@ fun StoryRowDto.toEntity(): StoryEntity = StoryEntity(
     expiresAt = isoToMillis(expiresAt),
     viewedByMe = viewedByMe,
     pendingSync = false,
+    mediaPath = mediaPath,
+    mediaType = mediaType,
 )
 
 fun StoryEntity.toDomain(): Story = Story(
@@ -66,6 +68,8 @@ fun StoryEntity.toDomain(): Story = Story(
     expiresAt = expiresAt,
     viewedByMe = viewedByMe,
     pendingSync = pendingSync,
+    mediaPath = mediaPath,
+    mediaType = mediaType,
 )
 
 fun ProfileDto.toEntity(isMe: Boolean): ProfileEntity = ProfileEntity(

@@ -32,12 +32,13 @@ la connexion est mauvaise ou chère.
 |---|---|---|
 | **Onboarding** | Pseudo (validé 3–20 `[a-z0-9_]`, réservés refusés), visibilité du profil, avertissement explicite sur le compte anonyme | `ProfileRepository`, Supabase |
 | **Accueil / Fil** | Bandeau de stories (24 h), composeur (2000 caractères), fil local, réactions, compteur de commentaires, bandeau hors ligne, compteur d'opérations en attente | Room, `FeedRepository`, `StoryRepository`, `SyncEngine` |
-| **Stories** | Création (texte 300 caractères, 5 fonds), visionneuse, marquage « vue », suppression par l'auteur, expiration 24 h même hors ligne | Room, `StoryRepository`, RLS `stories` |
+| **Stories** | Création (texte 300 caractères, 5 fonds, **photo ou vidéo**), visionneuse, marquage « vue », suppression par l'auteur, expiration 24 h même hors ligne | Room, `StoryRepository`, bucket `stories`, RLS |
 | **Détail publication** | Publication, commentaires (ajout, suppression), réaction, signalement, blocage de l'auteur, suppression de sa publication | Room, modération |
 | **Communautés** | Liste réelle, création (publique/privée), adhésion, demande en attente, sortie | Room, `CommunityRepository` |
 | **Détail communauté** | Description, nombre de membres, rôle, composeur réservé aux membres actifs, fil de la communauté | Room, RLS |
-| **Messages** | Liste des conversations avec dernier message et état de livraison | Room |
-| **Conversation** | Messages, envoi local-first, déduplication par `client_id`, état « en attente », bandeau E2EE honnête | Room, sync |
+| **Messages** | Liste des conversations avec dernier message, état de livraison et **flamme 🔥** (jours consécutifs à écrire tous les deux) | Room |
+| **Conversation** | Messages, envoi local-first, déduplication par `client_id`, état « en attente », flamme 🔥, bandeau E2EE honnête | Room, sync |
+| **Ajout par QR** | QR personnel, scan caméra (PWA), code collé ; crée la conversation même hors ligne | PWA `BarcodeDetector`, Android QR affiché |
 | **Proximité** | Permissions runtime, découverte BLE/Wi-Fi, envoi direct, activation du relais, file de relais | `:net` |
 | **Profil** | Profil éditable, identifiant de compte, code de récupération, blocages, opérations en attente, déconnexion | Room, Keystore, modération |
 | **Réglages** | Thème (système/clair/sombre), couleurs dynamiques, relais, économie de batterie, confidentialité, à propos | `SettingsStore` |

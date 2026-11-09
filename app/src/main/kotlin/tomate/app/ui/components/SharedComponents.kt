@@ -141,7 +141,11 @@ fun ConversationRow(
             Spacer(Modifier.width(TomateSpacing.m))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = conversation.title,
+                    text = if (conversation.streak > 0) {
+                        "${conversation.title} · 🔥 ${conversation.streak}"
+                    } else {
+                        conversation.title
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

@@ -174,3 +174,21 @@ Points importants :
 | 0 ligne sur `/rest/v1/feed` | aucune publication visible pour cet utilisateur | créer une publication publique |
 | `new row violates check constraint "profiles_handle_check"` | pseudo hors format | 3–20 caractères `[a-z0-9_]`, non réservé |
 | Erreur de stockage 403 | politiques du bucket | réexécuter `0003_storage.sql` |
+
+## Migration 0005 — médias de stories et correctif messagerie
+
+`supabase/migrations/0005_media_reseau.sql` :
+
+1. colonnes `media_path` / `media_type` sur `stories` (photo ou vidéo, texte facultatif) ;
+2. bucket `stories` (26 Mo, images et vidéos), lecture publique, écriture limitée à
+   `<user_id>/…` ;
+3. vue `stories_feed` étendue aux deux nouvelles colonnes ;
+4. politique d'insertion des membres de conversation élargie au créateur (en plus du trigger
+   qui ajoute déjà le créateur comme membre).
+
+À exécuter dans le SQL Editor, puis vérifier :
+
+```bash
+curl -s "$SUPABASE_URL/rest/v1/stories_feed?select=id,media_path&limit=1" \
+  -H "apikey: $KEY" -H "Authorization: Bearer $TOKEN"
+```

@@ -66,6 +66,8 @@ data class StoryRowDto(
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("viewed_by_me") val viewedByMe: Boolean = false,
+    @SerialName("media_path") val mediaPath: String? = null,
+    @SerialName("media_type") val mediaType: String? = null,
 )
 
 @Serializable
@@ -74,6 +76,8 @@ data class StoryInsert(
     @SerialName("author_id") val authorId: String,
     val body: String,
     val background: String = "sunset",
+    @SerialName("media_path") val mediaPath: String? = null,
+    @SerialName("media_type") val mediaType: String? = null,
 )
 
 @Serializable

@@ -75,6 +75,8 @@ data class Story(
     val expiresAt: Long = 0L,
     val viewedByMe: Boolean = false,
     val pendingSync: Boolean = false,
+    val mediaPath: String? = null,
+    val mediaType: String? = null,
 ) {
     fun isExpired(now: Long): Boolean = expiresAt <= now
 }
@@ -111,6 +113,8 @@ data class Conversation(
     val unreadCount: Int = 0,
     val pendingCount: Int = 0,
     val members: List<String> = emptyList(),
+    /** Consecutive days (UTC) on which both participants wrote. Computed from real messages. */
+    val streak: Int = 0,
 )
 
 data class Message(

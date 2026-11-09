@@ -172,6 +172,13 @@ interface ConversationDao {
     suspend fun reassignMember(oldId: String, newId: String)
 }
 
+/** One row per conversation per UTC day, with the number of distinct senders that day. */
+data class StreakDayRow(
+    val conversationId: String,
+    val dayIndex: Long,
+    val senders: Int,
+)
+
 @Dao
 interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -212,6 +219,18 @@ interface MessageDao {
 
     @Query("UPDATE messages SET senderId = :newId WHERE senderId = :oldId")
     suspend fun reassignSender(oldId: String, newId: String)
+
+    @Query(
+        """
+        SELECT conversationId AS conversationId,
+               (createdAt / 86400000) AS dayIndex,
+               COUNT(DISTINCT senderId) AS senders
+          FROM messages
+         GROUP BY conversationId, dayIndex
+         ORDER BY dayIndex DESC
+        """,
+    )
+    fun observeStreakDays(): Flow<List<StreakDayRow>>
 }
 
 @Dao

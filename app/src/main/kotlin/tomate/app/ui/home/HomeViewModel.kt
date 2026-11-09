@@ -25,6 +25,11 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val text: String = "",
         val background: String = StoryRepository.BACKGROUNDS.first(),
         val posting: Boolean = false,
+        val media: ByteArray? = null,
+        val mediaType: String? = null,
+        val mimeType: String? = null,
+        val extension: String = "jpg",
+        val mediaLabel: String? = null,
     )
 
     /** Base state, before the stories flows are merged in. */
@@ -183,12 +188,49 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         storyDraft.value = storyDraft.value?.copy(background = background)
     }
 
+    fun attachStoryMedia(
+        bytes: ByteArray,
+        mediaType: String,
+        mimeType: String,
+        extension: String,
+        label: String,
+    ) {
+        storyDraft.value = storyDraft.value?.copy(
+            media = bytes,
+            mediaType = mediaType,
+            mimeType = mimeType,
+            extension = extension,
+            mediaLabel = label,
+        )
+    }
+
+    fun clearStoryMedia() {
+        storyDraft.value = storyDraft.value?.copy(
+            media = null,
+            mediaType = null,
+            mimeType = null,
+            mediaLabel = null,
+        )
+    }
+
+    /** Public URL of a story's photo or video, or null for a text-only story. */
+    fun mediaUrl(story: Story): String? = container.stories.mediaUrl(story.mediaPath)
+
     fun publishStory() {
         val draft = storyDraft.value ?: return
-        if (draft.text.isBlank()) return
+        if (draft.text.isBlank() && draft.media == null) return
         viewModelScope.launch {
             storyDraft.value = draft.copy(posting = true)
-            when (val result = container.stories.create(draft.text, draft.background)) {
+            when (
+                val result = container.stories.create(
+                    body = draft.text,
+                    background = draft.background,
+                    media = draft.media,
+                    mediaType = draft.mediaType,
+                    mimeType = draft.mimeType,
+                    extension = draft.extension,
+                )
+            ) {
                 is Outcome.Success -> {
                     storyDraft.value = null
                     now.value = System.currentTimeMillis()

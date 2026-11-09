@@ -1,5 +1,12 @@
 package tomate.app.ui.home
 
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,14 +54,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import tomate.app.ui.components.PostCard
 import tomate.app.ui.vm.tomateViewModelFactory
 import tomate.core.designsystem.components.MetricPill
@@ -189,6 +202,7 @@ fun HomeScreen(
     if (openStory != null) {
         StoryViewer(
             story = openStory,
+            mediaUrl = viewModel.mediaUrl(openStory),
             mine = openStory.authorId == state.myId,
             onDismiss = { openStoryId = null },
             onDelete = {
@@ -204,6 +218,8 @@ fun HomeScreen(
             draft = draft,
             onChange = viewModel::onStoryDraftChange,
             onBackground = viewModel::selectStoryBackground,
+            onMedia = viewModel::attachStoryMedia,
+            onClearMedia = viewModel::clearStoryMedia,
             onDismiss = viewModel::closeStoryComposer,
             onPublish = viewModel::publishStory,
         )
@@ -306,11 +322,13 @@ private fun StoryBubble(
 @Composable
 private fun StoryViewer(
     story: Story,
+    mediaUrl: String?,
     mine: Boolean,
     onDismiss: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val remaining = (story.expiresAt - System.currentTimeMillis()).coerceAtLeast(0L)
+    val context = LocalContext.current
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier
@@ -319,6 +337,9 @@ private fun StoryViewer(
             shape = RoundedCornerShape(26.dp),
         ) {
             Box(modifier = Modifier.background(storyBrush(story.background))) {
+                if (mediaUrl != null && story.mediaType == "image") {
+                    RemoteStoryImage(url = mediaUrl, modifier = Modifier.fillMaxSize())
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -361,12 +382,26 @@ private fun StoryViewer(
                             .fillMaxWidth(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = story.body,
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (mediaUrl != null && story.mediaType == "video") {
+                                TextButton(onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(mediaUrl)))
+                                    }
+                                }) {
+                                    Text("Ouvrir la vidéo", color = Color.White)
+                                }
+                            }
+                            if (story.body.isNotBlank()) {
+                                Text(
+                                    text = story.body,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = Color.White,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                )
+                            }
+                        }
                     }
                     Text(
                         text = "Disparaît automatiquement 24 h après sa publication.",
@@ -385,9 +420,46 @@ private fun StoryComposer(
     draft: HomeViewModel.StoryDraft,
     onChange: (String) -> Unit,
     onBackground: (String) -> Unit,
+    onMedia: (ByteArray, String, String, String, String) -> Unit,
+    onClearMedia: () -> Unit,
     onDismiss: () -> Unit,
     onPublish: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var mediaError by remember { mutableStateOf<String?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+        val isVideo = mime.startsWith("video/")
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null) {
+            mediaError = "Lecture du fichier impossible."
+            return@rememberLauncherForActivityResult
+        }
+        if (isVideo && bytes.size > 25 * 1024 * 1024) {
+            mediaError = "Vidéo trop lourde : 25 Mo maximum."
+            return@rememberLauncherForActivityResult
+        }
+        if (!isVideo) {
+            val compressed = compressStoryImage(bytes)
+            if (compressed == null) {
+                mediaError = "Photo illisible."
+                return@rememberLauncherForActivityResult
+            }
+            mediaError = null
+            onMedia(compressed, "image", "image/jpeg", "jpg", "Photo prête (${compressed.size / 1024} Ko)")
+        } else {
+            val extension = when {
+                mime.contains("webm") -> "webm"
+                mime.contains("quicktime") -> "mov"
+                else -> "mp4"
+            }
+            mediaError = null
+            onMedia(bytes, "video", mime, extension, "Vidéo prête (${bytes.size / (1024 * 1024)} Mo)")
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Nouvelle story") },
@@ -432,6 +504,32 @@ private fun StoryComposer(
                     modifier = Modifier.align(Alignment.End),
                 )
                 Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { picker.launch("*/*") }, enabled = !draft.posting) {
+                        Text("Photo ou vidéo")
+                    }
+                    if (draft.media != null) {
+                        Text(
+                            text = draft.mediaLabel ?: "Média prêt",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onClearMedia, enabled = !draft.posting) { Text("Retirer") }
+                    }
+                }
+                mediaError?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StoryRepository.BACKGROUNDS.forEach { background ->
                         Box(
@@ -455,7 +553,7 @@ private fun StoryComposer(
             }
         },
         confirmButton = {
-            TextButton(onClick = onPublish, enabled = draft.text.isNotBlank() && !draft.posting) {
+            TextButton(onClick = onPublish, enabled = (draft.text.isNotBlank() || draft.media != null) && !draft.posting) {
                 Text(if (draft.posting) "Publication…" else "Publier")
             }
         },
@@ -489,4 +587,41 @@ private fun storyBrush(background: String): Brush = when (background) {
     "night" -> Brush.linearGradient(listOf(Color(0xFF334155), Color(0xFF0F172A)))
     "plain" -> Brush.linearGradient(listOf(Color(0xFF7C3AED), Color(0xFFDB2777)))
     else -> Brush.linearGradient(listOf(Color(0xFFFB923C), Color(0xFFD94A22)))
+}
+
+/** Downloads a story photo off the main thread; a failed download simply shows nothing. */
+@Composable
+private fun RemoteStoryImage(url: String, modifier: Modifier = Modifier) {
+    var bitmap by remember(url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(url) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                java.net.URL(url).openStream().use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+            }.getOrNull()
+        }
+    }
+    bitmap?.let {
+        Image(
+            bitmap = it,
+            contentDescription = "Photo de la story",
+            modifier = modifier,
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
+/** Downscales to 1440 px and re-encodes as JPEG so a phone photo fits the bucket. */
+private fun compressStoryImage(bytes: ByteArray): ByteArray? {
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    val longest = maxOf(bitmap.width, bitmap.height)
+    val scaled = if (longest > 1440) {
+        val ratio = 1440f / longest
+        Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
+    } else {
+        bitmap
+    }
+    return ByteArrayOutputStream().use { output ->
+        scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)
+        output.toByteArray()
+    }
 }

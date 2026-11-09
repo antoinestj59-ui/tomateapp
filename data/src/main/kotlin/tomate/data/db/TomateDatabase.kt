@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncStateEntity::class,
         BlockedUserEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -68,9 +68,17 @@ abstract class TomateDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 adds the story media columns; nothing else is touched. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `stories` ADD COLUMN `mediaPath` TEXT")
+                db.execSQL("ALTER TABLE `stories` ADD COLUMN `mediaType` TEXT")
+            }
+        }
+
         fun build(context: Context): TomateDatabase =
             Room.databaseBuilder(context.applicationContext, TomateDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
                 .build()
     }

@@ -2,6 +2,7 @@ package tomate.data.repo
 
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import tomate.core.model.AppError
@@ -25,6 +26,7 @@ import tomate.data.db.MessageEntity
 import tomate.data.db.OutboxDao
 import tomate.data.db.OutboxEntity
 import tomate.data.db.ProfileDao
+import tomate.data.db.StreakDayRow
 import tomate.data.e2ee.E2eeEngine
 import tomate.data.e2ee.E2eeStatus
 import tomate.data.mapper.toDomain
@@ -53,8 +55,31 @@ class MessagingRepository(
 ) {
     val encryptionStatus: E2eeStatus get() = e2ee.status
 
+    /**
+     * Conversations with their flame count. The streak is derived from the messages themselves:
+     * a day counts only when both participants wrote, so no counter is ever invented.
+     */
     fun observeConversations(): Flow<List<Conversation>> =
-        conversationDao.observeAll().map { rows -> rows.map { it.toDomain() } }
+        combine(conversationDao.observeAll(), messageDao.observeStreakDays()) { rows, days ->
+            val byConversation = days.groupBy { it.conversationId }
+            rows.map { row ->
+                row.toDomain().copy(streak = computeStreak(byConversation[row.id].orEmpty()))
+            }
+        }
+
+    /** Consecutive days ending today (or yesterday, while today is still incomplete). */
+    private fun computeStreak(days: List<StreakDayRow>): Int {
+        val complete = days.filter { it.senders >= 2 }.map { it.dayIndex }.toSet()
+        if (complete.isEmpty()) return 0
+        val today = clock() / DAY_MS
+        var cursor = if (today in complete) today else today - 1
+        var count = 0
+        while (cursor in complete) {
+            count += 1
+            cursor -= 1
+        }
+        return count
+    }
 
     fun observeMessages(conversationId: String): Flow<List<Message>> =
         messageDao.observeForConversation(conversationId).map { rows -> rows.map { it.toDomain() } }
@@ -342,5 +367,6 @@ class MessagingRepository(
 
     companion object {
         const val MAX_MESSAGE_LENGTH = 4000
+        private const val DAY_MS = 86_400_000L
     }
 }

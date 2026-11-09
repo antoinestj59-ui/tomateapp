@@ -176,6 +176,8 @@ data class StoryEntity(
     val expiresAt: Long,
     val viewedByMe: Boolean,
     val pendingSync: Boolean,
+    val mediaPath: String? = null,
+    val mediaType: String? = null,
 )
 
 /** Aggregate row used by the message list screen. */

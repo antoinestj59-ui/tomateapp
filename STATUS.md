@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.1.4
+# STATUS — TOMATE 0.1.5
 
 Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,7 +10,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.4-debug.apk` — 23 Mo, `versionCode 5` |
+| APK | `artifacts/tomate-0.1.5-debug.apk` — 23 Mo, `versionCode 6` |
 | `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
@@ -20,7 +20,7 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 |---|---|
 | Code | `web/` (sans build), `sites.web.json` |
 | Aperçu publié | https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page |
-| Version | `0.1.4-web` |
+| Version | `0.1.5-web` |
 | Auth anonyme | `POST /auth/v1/signup` → **HTTP 200** |
 | Publication / réaction / commentaire | écrits puis **vérifiés côté serveur** |
 | Messagerie | message PWA → second compte **HTTP 201 vérifié**, réponse → PWA affichée |
@@ -70,6 +70,18 @@ Migration `supabase/migrations/0004_stories.sql` appliquée par vous dans le SQL
 Android : Room v2 (migration 1→2), `StoryRepository`, kinds `story_insert` / `story_view` /
 `story_delete`, bandeau, visionneuse et composeur — **compile et tests unitaires PASS**, mais
 **non exécuté sur appareil** (aucun appareil disponible ici).
+
+## 2 ter. Réseau social 0.1.5 — vérifié le 9 novembre 2026
+
+| Fonction | État vérifié |
+|---|---|
+| Stories photo/vidéo | **code livré**, envoi réel **bloqué** tant que `0005_media_reseau.sql` n'est pas exécutée (le message d'erreur le dit). Photo compressée côté client (1440 px, JPEG 82) et aperçu testés dans le navigateur. |
+| Ajout d'ami par QR (PWA) | **vérifié** : QR généré (`tomato://add?u=…`), lien collé, conversation créée avec le bon pair, message envoyé. |
+| Ajout d'ami hors ligne | **vérifié en code** : la conversation est écrite localement puis mise en file ; l'envoi réel a été constaté en ligne. |
+| Flammes 🔥 | **vérifié** : conversation avec messages de deux comptes sur deux jours → `🔥 2` affiché dans la liste et l'en-tête. |
+| Chaîne de messages entre deux comptes | **vérifiée** : conversation créée par M2 (**201**), membre ajouté (**201**), deux messages par compte, l'autre compte lit les quatre. |
+| Scanner caméra | **PWA uniquement** (API `BarcodeDetector`) ; non testé ici : le navigateur cloud n'a pas de caméra. Android : QR affiché + code collé, pas de scan caméra. |
+| Chiffrement de bout en bout | **non implémenté** — étude et plan dans [`docs/08_RESEAU_ET_CHIFFREMENT.md`](docs/08_RESEAU_ET_CHIFFREMENT.md). |
 
 ## 3. Correctifs de cette itération
 
