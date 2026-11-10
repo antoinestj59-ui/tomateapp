@@ -1,6 +1,6 @@
-# STATUS — TOMATE 0.1.9
+# STATUS — TOMATE 0.2.4
 
-Dernière vérification : **9 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
+Dernière vérification : **10 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
 
 Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est déclaré comme tel.
@@ -265,3 +265,43 @@ Deux causes mesurées, corrigées :
 - Toujours non appliquées par le propriétaire : `0007` (notifications), `0008`, `0009`.
 - Non entamé : appels audio/vidéo, E2EE réel, mesh A→B→C, sondages, événements, modération
   administrateur, assistant.
+
+## 2 octies. Itération 0.2.x — sondages, événements, appels (vérifié le 10 novembre 2026)
+
+### Ce qui a été créé
+
+| Élément | Fichier | État |
+|---|---|---|
+| Protocoles sondage / vote / événement / appel, `CallSession` WebRTC, auto-test de négociation | `web/js/extras.js` | **exécuté en navigateur réel** |
+| Bouton sondage, cartes d'événement + RSVP, appels audio/vidéo, fenêtre d'appel | `web/js/app.js`, `web/css/app.css` | **déployé** (0.2.4-web, cache `tomate-shell-v32`) |
+
+Aucune migration nouvelle : ces fonctions réutilisent `messages`, `posts` et `post_reactions` avec des
+protocoles préfixés (`[[tomate:poll:v1]]`, `[[tomate:vote:v1]]…`, `[[tomate:event:v1]]`,
+`[[tomate:call:v1]]`). Les messages de protocole sont filtrés à l'affichage.
+
+### Vérifications réellement exécutées sur l'aperçu déployé
+
+| Action | Résultat observé |
+|---|---|
+| Sondage créé dans une conversation (compte `verifmedia`) | carte affichée, question et options lisibles, aucun JSON brut |
+| Vote depuis `verifmedia` (option 0) et `verif689a7b` (option 1) | « 1 / 1, 2 votant(s) » : dépouillement dédupliqué par votant |
+| Événement « Apéro TOMATE » créé via l'UI | carte datée, lieu, sans marqueur brut |
+| RSVP coché / décoché / recoché | ligne `post_reactions kind='participe'` créée, **supprimée réellement** (`[]` côté serveur), recréée ; compteurs 1 → 0 → 1 |
+| Bug corrigé : compte du créateur | affichait 0 RSVP, initialisé à 1 (`{count: 1, mine: true}`) |
+| Appel audio : offre | **erreur `23514` réelle** : le SDP dépasse les 4000 caractères de `messages.body`. Corrigé par découpage/réassemblage (`packSignal`/`collectSignals`) |
+| Appel audio après correctif, deux comptes | offre envoyée, second compte reçoit « Appel audio entrant » (Refuser / Répondre), réponse appliquée par l'appelant (`signalingState: stable`), pistes distantes reçues |
+| Établissement ICE entre les deux contextes du navigateur cloud | **échoue** (`ice: disconnected` → `connection: failed`) : les deux onglets sortent par le même NAT, sans serveur TURN. l'appel se termine. Le message d'échec ajouté ensuite (« Appel échoué : la liaison directe n'a pas abouti (réseau restrictif ou NAT) ») a été vérifié séparément par injection de l'état `failed` sur la connexion : toast affiché, fenêtre fermée |
+| Chemin média complet, deux pairs, flux synthétiques (canvas + oscillateur) | `loopbackNegotiationTest({ media: true })` → **`ok: true` en 1 999 ms**, chaque pair reçoit `audio:live` + `video:live` |
+
+### Limites de cette itération
+
+- **Aucun appel réel entre deux appareils n'a été vérifié.** Ce qui est prouvé : la signalisation
+  (offre, sonnerie, réponse, candidats) et le chemin média (pistes ajoutées, négociées, reçues).
+  Ce qui ne l'est pas : l'établissement ICE hors NAT partagé, donc l'audio audible. Aucun TURN
+  n'est configuré ; sur deux réseaux distincts l'appel peut échouer de la même façon.
+- Le navigateur cloud n'a **ni micro ni caméra** : les tests média utilisent des flux synthétiques
+  (`canvas.captureStream` + oscillateur), pas un périphérique réel.
+- **Android n'a pas ces fonctions** : sondages, événements et appels existent uniquement dans la
+  PWA. L'APK reste `0.1.9` (`versionCode 10`), inchangé depuis la dernière compilation.
+- Toujours non appliquées par le propriétaire : `0007` (notifications), `0008`, `0009` (médias).
+- Non entamé : refonte visuelle Android, E2EE réel, mesh A→B→C, modération administrateur, assistant.

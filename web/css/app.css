@@ -1112,3 +1112,196 @@ dialog.story-dialog {
   text-align: center;
   flex: none;
 }
+
+/* ============================================================ sondages & événements */
+
+.poll-card {
+  align-self: flex-start;
+  max-width: 92%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 12px 10px;
+  box-shadow: var(--shadow-1);
+}
+
+.poll-card.mine {
+  align-self: flex-end;
+  border-color: var(--primary-soft);
+}
+
+.poll-question {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 9px;
+  color: var(--text);
+}
+
+.poll-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.poll-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.poll-option:hover { border-color: var(--primary); }
+
+.poll-option.chosen {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  font-weight: 650;
+}
+
+.poll-share {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  pointer-events: none;
+  transition: width 0.25s ease;
+}
+
+.poll-label { position: relative; flex: 1; }
+.poll-count { position: relative; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--primary-strong); }
+
+.event-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  margin: 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+}
+
+.event-date {
+  flex: none;
+  width: 54px;
+  height: 58px;
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: var(--on-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.event-day { font-size: 21px; font-weight: 800; }
+.event-month { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.9; }
+.event-title { font-weight: 700; font-size: 15.5px; color: var(--text); }
+
+/* ======================================================================== appels */
+
+.call-dialog {
+  border: none;
+  border-radius: var(--radius);
+  padding: 0;
+  width: min(420px, 92vw);
+  background: #16100e;
+  color: #fff;
+  overflow: hidden;
+}
+
+.call-dialog::backdrop { background: rgba(18, 10, 8, 0.72); }
+
+.call-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 18px 18px;
+  min-height: 240px;
+  justify-content: center;
+}
+
+.call-remote {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.call-local {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 92px;
+  height: 124px;
+  object-fit: cover;
+  border-radius: var(--radius-xs);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: #000;
+  z-index: 2;
+}
+
+.call-glyph {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  animation: call-pulse 2.2s ease-in-out infinite;
+}
+
+.call-glyph svg { width: 34px; height: 34px; }
+.call-glyph.live { animation: none; background: var(--primary); }
+.call-status { font-size: 15px; font-weight: 650; position: relative; z-index: 1; }
+.call-dialog .muted { color: rgba(255, 255, 255, 0.62); }
+
+.call-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.call-btn {
+  flex: 1;
+  padding: 12px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.call-btn[aria-pressed='true'] { background: rgba(255, 255, 255, 0.28); }
+.call-btn.danger { background: var(--primary); border-color: var(--primary); }
+.call-btn.accept { background: var(--success); border-color: var(--success); }
+
+@keyframes call-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(217, 68, 42, 0.35); }
+  50% { transform: scale(1.04); box-shadow: 0 0 0 14px rgba(217, 68, 42, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-glyph { animation: none; }
+}

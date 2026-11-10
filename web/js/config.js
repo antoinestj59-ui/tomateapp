@@ -5,7 +5,7 @@
 export const SUPABASE_URL = 'https://omsupwmlncuapikbjumg.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_IOga6ANcbYMivphwt4mR7Q_VziRyrIj';
 
-export const APP_VERSION = '0.1.9-web';
+export const APP_VERSION = '0.2.4-web';
 export const LOCAL_PREFIX = 'local-';
 export const MAX_POST_LENGTH = 2000;
 export const MAX_COMMENT_LENGTH = 1000;
