@@ -15,7 +15,11 @@ data class TomateSettings(
     val dynamicColor: Boolean = false,
     val relayEnabled: Boolean = true,
     val batterySaver: Boolean = false,
-)
+    /** Relais TURN : vide tant que l'utilisateur n'en a pas enregistré un. */
+    val turnUrl: String? = null,
+    val turnUser: String? = null,
+    val turnPassword: String? = null,
+) { val hasTurn: Boolean get() = !turnUrl.isNullOrBlank() }
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "tomate_settings")
 
@@ -26,6 +30,9 @@ class SettingsStore(private val context: Context) {
         val dynamicColor = booleanPreferencesKey("dynamic_color")
         val relayEnabled = booleanPreferencesKey("relay_enabled")
         val batterySaver = booleanPreferencesKey("battery_saver")
+        val turnUrl = stringPreferencesKey("turn_url")
+        val turnUser = stringPreferencesKey("turn_user")
+        val turnPassword = stringPreferencesKey("turn_password")
     }
 
     val settings: Flow<TomateSettings> = context.settingsDataStore.data.map { prefs ->
@@ -34,6 +41,9 @@ class SettingsStore(private val context: Context) {
             dynamicColor = prefs[Keys.dynamicColor] ?: false,
             relayEnabled = prefs[Keys.relayEnabled] ?: true,
             batterySaver = prefs[Keys.batterySaver] ?: false,
+            turnUrl = prefs[Keys.turnUrl],
+            turnUser = prefs[Keys.turnUser],
+            turnPassword = prefs[Keys.turnPassword],
         )
     }
 
@@ -51,5 +61,22 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setBatterySaver(enabled: Boolean) {
         context.settingsDataStore.edit { it[Keys.batterySaver] = enabled }
+    }
+
+    /** Le relais reste sur l'appareil : ni le serveur ni les messages ne le voient. */
+    suspend fun setTurn(url: String, user: String, password: String) {
+        context.settingsDataStore.edit {
+            it[Keys.turnUrl] = url.trim()
+            it[Keys.turnUser] = user.trim()
+            it[Keys.turnPassword] = password
+        }
+    }
+
+    suspend fun clearTurn() {
+        context.settingsDataStore.edit {
+            it.remove(Keys.turnUrl)
+            it.remove(Keys.turnUser)
+            it.remove(Keys.turnPassword)
+        }
     }
 }

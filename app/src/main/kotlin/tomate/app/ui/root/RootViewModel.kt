@@ -155,6 +155,15 @@ class RootViewModel(private val container: TomateContainer) : ViewModel() {
         viewModelScope.launch { container.settings.setRelayEnabled(enabled) }
     }
 
+    /** Le relais TURN reste sur l'appareil : il n'est jamais publié ni envoyé. */
+    fun saveTurn(url: String, user: String, password: String) {
+        viewModelScope.launch { container.settings.setTurn(url, user, password) }
+    }
+
+    fun clearTurn() {
+        viewModelScope.launch { container.settings.clearTurn() }
+    }
+
     fun setBatterySaver(enabled: Boolean) {
         viewModelScope.launch { container.settings.setBatterySaver(enabled) }
     }

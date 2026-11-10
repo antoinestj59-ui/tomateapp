@@ -20,7 +20,14 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import tomate.core.designsystem.components.TomateTextField
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -44,6 +51,9 @@ fun SettingsScreen(
     onRelayEnabledChange: (Boolean) -> Unit,
     batterySaver: Boolean,
     onBatterySaverChange: (Boolean) -> Unit,
+    turnUrl: String? = null,
+    onSaveTurn: (String, String, String) -> Unit = { _, _, _ -> },
+    onClearTurn: () -> Unit = {},
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
@@ -122,6 +132,66 @@ fun SettingsScreen(
                                 )
                             }
                             Switch(checked = batterySaver, onCheckedChange = onBatterySaverChange)
+                        }
+                    }
+                }
+            }
+
+            item {
+                TomateCard {
+                    Column(modifier = Modifier.padding(TomateSpacing.l)) {
+                        Text("Appels : relais TURN", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(TomateSpacing.xs))
+                        Text(
+                            text = if (turnUrl.isNullOrBlank()) {
+                                "Aucun relais enregistré. Les appels utilisent STUN : ils passent sur un réseau " +
+                                    "ouvert, mais échouent derrière un NAT restrictif."
+                            } else {
+                                "Relais actif : $turnUrl — les appels y passent quand la liaison directe échoue."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(TomateSpacing.s))
+                        var url by remember { mutableStateOf(turnUrl.orEmpty()) }
+                        var user by remember { mutableStateOf("") }
+                        var password by remember { mutableStateOf("") }
+                        TomateTextField(
+                            value = url,
+                            onValueChange = { url = it },
+                            label = "Adresse (turn:hote:3478)",
+                            singleLine = true,
+                        )
+                        Spacer(Modifier.height(TomateSpacing.xs))
+                        TomateTextField(
+                            value = user,
+                            onValueChange = { user = it },
+                            label = "Identifiant",
+                            singleLine = true,
+                        )
+                        Spacer(Modifier.height(TomateSpacing.xs))
+                        TomateTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = "Mot de passe",
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                        )
+                        Spacer(Modifier.height(TomateSpacing.xs))
+                        Text(
+                            text = "Ces valeurs restent sur cet appareil ; elles ne sont ni publiées ni envoyées " +
+                                "dans un message.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { onSaveTurn(url.trim(), user.trim(), password) },
+                                enabled = url.startsWith("turn") || url.startsWith("turns"),
+                            ) { Text("Enregistrer le relais") }
+                            if (!turnUrl.isNullOrBlank()) {
+                                TextButton(onClick = { onClearTurn(); url = "" }) { Text("Effacer") }
+                            }
                         }
                     }
                 }

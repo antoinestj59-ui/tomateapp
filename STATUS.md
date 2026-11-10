@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.2.5
+# STATUS — TOMATE 0.3.0
 
 Dernière vérification : **10 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,8 +10,9 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.2.0-debug.apk` — 24 Mo, `versionCode 11` |
-| `:data:testDebugUnitTest` | **BUILD SUCCESSFUL**, 22 tests, 0 échec (dont 7 pour les protocoles sondage/vote/événement) |
+| APK | `artifacts/tomate-0.3.0-debug.apk` — 69 Mo (WebRTC pour 4 ABI), `versionCode 12` |
+| `:data:testDebugUnitTest` | **BUILD SUCCESSFUL**, 29 tests, 0 échec (dont 7 sondage/vote/événement, 7 signalisation d'appel) |
+| `:net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 15 tests, 0 échec |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
 ## 2. PWA — build et tests réels
@@ -358,9 +359,49 @@ Publication `49deae70-1bbe-4310-a0bb-ed374c99658c` (« Apéro TOMATE ») :
   deux réseaux n'a été établi.
 - Le navigateur cloud ne collecte **qu'un candidat `host` et un `srflx`** : suffisant pour un
   appel LAN, insuffisant pour deux réseaux restrictifs.
-- **Android n'a pas d'appels** : la signalisation WebRTC native reste à écrire. Un appel lancé
-  depuis la PWA n'affiche rien sur Android, et les messages `[[tomate:call:v1]]` y sont masqués
-  au lieu d'apparaître en JSON.
+- **Android n'avait pas d'appels à cette itération** : la signalisation WebRTC native a été
+  écrite depuis (voir § 2 decies). Un appel PWA ne pouvait alors rien déclencher sur Android.
 - **Aucun appareil Android ni émulateur** : l'APK est compilé, pas exécuté. Les écrans sondage et
   événement ne sont donc **pas** vérifiés visuellement.
+- Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009`.
+
+## 2 decies. Itération 0.3.0 — appels natifs Android (vérifié le 10 novembre 2026)
+
+### Ce qui est en place
+
+| Élément | Fichier | État |
+|---|---|---|
+| Codec de signalisation partagé (découpage base64, `id\|index\|total\|morceau`, 3000 caractères) | `data/.../extras/CallCodec.kt` | testé (7 tests) |
+| Moteur WebRTC : offre, réponse, candidats, fin, micro, caméra, haut-parleur | `app/.../call/CallEngine.kt` | compilé |
+| Relais à la conversation : relecture toutes les 2 s, signaux déjà traités mémorisés | `app/.../call/CallController.kt` | compilé |
+| Boutons « Appel audio » / « Appel vidéo » (permission demandée seulement au moment d'appeler) | `ChatScreen.kt` | compilé |
+| Fenêtre d'appel : sonnerie, accepter/refuser, micro, caméra, haut-parleur, raccrocher, échec explicité | `ui/chat/CallOverlay.kt` | compilé |
+| Réglages « Appels : relais TURN » (adresse, identifiant, mot de passe, stockés sur l'appareil) | `SettingsScreen.kt`, `SettingsStore.kt` | compilé |
+| Permissions `RECORD_AUDIO`, `CAMERA`, `MODIFY_AUDIO_SETTINGS` (features déclarées non obligatoires) | `AndroidManifest.xml` | compilé |
+| Bibliothèque `io.github.webrtc-sdk:android:137.7151.05` | `libs.versions.toml` | 4 ABI dans l'APK |
+
+### Vérifications réellement effectuées
+
+| Test | Résultat |
+|---|---|
+| `CallCodecTest` (JVM) | **7 tests, 0 échec** : petit signal en un morceau, SDP de 5 Ko découpé en morceaux < 4000 caractères, paquet incomplet ignoré, ses propres messages ignorés, morceau produit par la PWA relu par Android (candidat ICE compris), signal Android relu comme le ferait le web (accents UTF-8 préservés) |
+| Suite `:data` complète | **29 tests, 0 échec** |
+| Suite `:net` complète | **15 tests, 0 échec** |
+| `:app:assembleDebug` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.3.0-debug.apk`, `libjingle_peerconnection_so.so` présent pour arm64-v8a, armeabi-v7a, x86, x86_64 |
+| Interopérabilité réelle dans le navigateur, sur l'aperçu déployé | offre construite **au format exact d'Android** (base64 + `id\|index\|total\|morceau`), relue par le `collectSignals` de la PWA, `CallSession` web répond, la réponse et **2 candidats ICE** reviennent au format Android et sont appliqués par un `RTCPeerConnection` brut : **`connectionState: connected` des deux côtés, `audio:live` reçu des deux côtés** |
+
+### Limites de cette itération
+
+- **Le moteur Kotlin n'a jamais tourné.** Aucun appareil Android ni émulateur n'est disponible
+  (`/dev/kvm` appartient à `root:kvm`, l'utilisateur du bac à sable n'y a pas accès ; aucun
+  system-image installé). Ce qui est prouvé : le format de signalisation et la négociation
+  (via un pair WebRTC du navigateur tenant le rôle d'Android), la compilation, la présence des
+  bibliothèques natives. Ce qui ne l'est pas : capture micro/caméra réelle, routage audio,
+  rendu vidéo Compose, comportement du moteur sur un téléphone.
+- Le test d'interopérabilité s'est déroulé **dans un seul navigateur**, deux contextes sur le même
+  réseau : il prouve la négociation et l'échange de médias, pas un appel entre deux réseaux
+  distincts (il faudrait un TURN opérationnel, toujours indisponible ici).
+- Les appels ne sonnent **que dans la conversation ouverte** : c'est la même limite que la PWA
+  (surveillance démarrée à l'ouverture du fil), pas une notification d'appel système.
+- L'APK pèse 69 Mo parce qu'il embarque les quatre ABI ; un découpage par ABI n'a pas été fait.
 - Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009`.

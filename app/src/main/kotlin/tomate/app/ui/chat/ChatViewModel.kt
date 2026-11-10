@@ -2,6 +2,8 @@ package tomate.app.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import tomate.app.call.CallController
+import tomate.app.call.CallEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +57,14 @@ class ChatViewModel(
 
     /** Set once the conversation is left or deleted: the screen closes itself. */
     val closed = MutableStateFlow(false)
+
+    private val calls = CallController(container, conversationId, viewModelScope)
+
+    /** État de l'appel en cours (ou d'un appel entrant) pour cette conversation. */
+    val call: kotlinx.coroutines.flow.StateFlow<CallEngine.Snapshot> get() = calls.state
+
+    /** Contexte OpenGL partagé par les rendus vidéo de l'appel. */
+    val eglBase: org.webrtc.EglBase get() = calls.engine.eglBase
 
     val state: StateFlow<UiState> = combine(
         container.messaging.observeConversation(conversationId),
@@ -219,5 +229,34 @@ class ChatViewModel(
 
     fun dismissError() {
         error.value = null
+    }
+
+    // ------------------------------------------------------------------- appels
+
+    fun startCall(video: Boolean) = calls.call(video)
+
+    fun acceptCall() = calls.accept()
+
+    fun declineCall() = calls.decline()
+
+    fun hangUpCall() = calls.hangUp()
+
+    fun toggleMute() {
+        val snapshot = call.value
+        calls.setMuted(!snapshot.micMuted)
+    }
+
+    fun toggleCamera() {
+        val snapshot = call.value
+        calls.setCameraOff(!snapshot.cameraOff)
+    }
+
+    fun toggleSpeaker() = calls.setSpeaker(!calls.engine.isSpeakerOn)
+
+    fun dismissCall() = calls.clear()
+
+    override fun onCleared() {
+        calls.release()
+        super.onCleared()
     }
 }

@@ -17,8 +17,8 @@ android {
         applicationId = "app.tomate"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.2.0"
+        versionCode = 12
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -57,6 +57,9 @@ dependencies {
     implementation(project(":data"))
     implementation(project(":net"))
 
+    // Appels audio/vidéo 1-à-1, même protocole de signalisation que la PWA.
+    implementation(libs.webrtc.android)
+
     // FCM client. Inert (guarded at runtime) until a google-services.json is added.
     implementation("com.google.firebase:firebase-messaging:24.1.0")
 
@@ -68,6 +71,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.room.runtime)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

@@ -30,7 +30,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -86,7 +94,32 @@ fun ChatScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val call by viewModel.call.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    var wantsVideo by remember { mutableStateOf(false) }
+
+    // Micro et caméra ne sont demandés qu'au moment d'appeler, jamais au lancement de l'app.
+    val permissions = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted ->
+        if (granted[Manifest.permission.RECORD_AUDIO] == true) {
+            viewModel.startCall(wantsVideo)
+        }
+    }
+
+    fun placeCall(video: Boolean) {
+        wantsVideo = video
+        val needed = buildList {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                add(Manifest.permission.RECORD_AUDIO)
+            }
+            if (video && ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                add(Manifest.permission.CAMERA)
+            }
+        }
+        if (needed.isEmpty()) viewModel.startCall(video) else permissions.launch(needed.toTypedArray())
+    }
 
     LaunchedEffect(Unit) {
         viewModel.closed.collect { if (it) onBack() }
@@ -123,7 +156,15 @@ fun ChatScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                 }
             },
-            actions = { ConversationMenu(viewModel = viewModel, canDelete = state.canDelete) },
+            actions = {
+                IconButton(onClick = { placeCall(false) }, enabled = !call.active) {
+                    Icon(Icons.Default.Call, contentDescription = "Appel audio")
+                }
+                IconButton(onClick = { placeCall(true) }, enabled = !call.active) {
+                    Icon(Icons.Default.Videocam, contentDescription = "Appel vidéo")
+                }
+                ConversationMenu(viewModel = viewModel, canDelete = state.canDelete)
+            },
         )
 
         if (state.error != null) {
@@ -188,6 +229,18 @@ fun ChatScreen(
         if (state.pollDialogOpen) {
             PollCreationDialog(state = state, viewModel = viewModel)
         }
+
+        CallOverlay(
+            snapshot = call,
+            eglBase = viewModel.eglBase,
+            onAccept = viewModel::acceptCall,
+            onDecline = viewModel::declineCall,
+            onHangUp = viewModel::hangUpCall,
+            onToggleMute = viewModel::toggleMute,
+            onToggleCamera = viewModel::toggleCamera,
+            onToggleSpeaker = viewModel::toggleSpeaker,
+            onDismiss = viewModel::dismissCall,
+        )
     }
 }
 

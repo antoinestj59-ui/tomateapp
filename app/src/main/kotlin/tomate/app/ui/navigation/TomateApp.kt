@@ -46,6 +46,9 @@ fun TomateApp(
     onRelayEnabledChange: (Boolean) -> Unit,
     batterySaver: Boolean,
     onBatterySaverChange: (Boolean) -> Unit,
+    turnUrl: String? = null,
+    onSaveTurn: (String, String, String) -> Unit = { _, _, _ -> },
+    onClearTurn: () -> Unit = {},
     notice: String? = null,
     onDismissNotice: () -> Unit = {},
 ) {
@@ -167,6 +170,9 @@ fun TomateApp(
                         onRelayEnabledChange = onRelayEnabledChange,
                         batterySaver = batterySaver,
                         onBatterySaverChange = onBatterySaverChange,
+                        turnUrl = turnUrl,
+                        onSaveTurn = onSaveTurn,
+                        onClearTurn = onClearTurn,
                     )
                 }
             }

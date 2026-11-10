@@ -34,6 +34,9 @@ class TomateContainer(
 ) {
     private val appContext = context.applicationContext
 
+    /** Contexte d'application : les appels WebRTC en ont besoin, sans exposer l'activité. */
+    val applicationContext: Context get() = appContext
+
     val database: TomateDatabase by lazy { TomateDatabase.build(appContext) }
     val crypto: CryptoBox = crypto
     val sessionStore: SessionStore = sessionStoreFactory(appContext, crypto)
