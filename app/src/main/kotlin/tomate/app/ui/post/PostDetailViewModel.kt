@@ -134,6 +134,34 @@ class PostDetailViewModel(
         viewModelScope.launch { container.feed.toggleReaction(post.id, post.reactedByMe) }
     }
 
+    private val editing = MutableStateFlow(false)
+    private val editText = MutableStateFlow("")
+
+    fun editingFlows(): kotlinx.coroutines.flow.Flow<Pair<Boolean, String>> =
+        kotlinx.coroutines.flow.combine(editing, editText) { e, t -> e to t }
+
+    fun startEdit() {
+        editText.value = state.value.post?.body.orEmpty()
+        editing.value = true
+    }
+
+    fun onEditChange(value: String) {
+        editText.value = value.take(2000)
+    }
+
+    fun cancelEdit() {
+        editing.value = false
+    }
+
+    fun confirmEdit() {
+        viewModelScope.launch {
+            when (val result = container.feed.editPost(postId, editText.value)) {
+                is Outcome.Success -> editing.value = false
+                is Outcome.Failure -> error.value = result.error
+            }
+        }
+    }
+
     fun delete() {
         viewModelScope.launch {
             when (val result = container.feed.deletePost(postId)) {

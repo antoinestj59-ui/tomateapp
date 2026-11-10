@@ -187,6 +187,41 @@ class FeedRepository(
         return "${tomate.data.backend.SupabaseConfig.url}/storage/v1/object/public/posts/$encoded"
     }
 
+    /**
+     * Modifie une de ses publications. La politique `posts_update_author` l'autorise déjà :
+     * aucune migration n'est nécessaire. Hors ligne, la modification part par la file.
+     */
+    suspend fun editPost(postId: String, body: String): Outcome<Unit> {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) {
+            return Outcome.Failure(AppError.Validation("empty_post", "Le message est vide."))
+        }
+        if (trimmed.length > MAX_POST_LENGTH) {
+            return Outcome.Failure(AppError.Validation("post_too_long", "Maximum $MAX_POST_LENGTH caractères."))
+        }
+        val post = postDao.byId(postId) ?: return Outcome.Failure(AppError.NotFound())
+        val me = session.currentUserId ?: return Outcome.Failure(AppError.Unauthorized())
+        if (post.authorId != me) {
+            return Outcome.Failure(AppError.Validation("not_author", "Seul l'auteur peut modifier cette publication."))
+        }
+        postDao.upsert(post.copy(body = trimmed, updatedAt = clock(), pendingSync = true))
+        val payload = """{"id":"$postId","body":${quoteJson(trimmed)}}"""
+        if (SessionManager.isLocalId(me)) {
+            enqueue("post_update", postId, payload)
+            return Outcome.Success(Unit)
+        }
+        return when (val remote = api.update("posts", listOf("id" to "eq.$postId"), payload)) {
+            is Outcome.Success -> {
+                postDao.upsert(postDao.byId(postId)?.copy(body = trimmed, pendingSync = false) ?: post.copy(body = trimmed))
+                Outcome.Success(Unit)
+            }
+            is Outcome.Failure -> {
+                enqueue("post_update", postId, payload)
+                Outcome.Failure(remote.error)
+            }
+        }
+    }
+
     suspend fun deletePost(postId: String): Outcome<Unit> {
         postDao.markDeleted(postId)
         if (session.isLocalAccount()) {

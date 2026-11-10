@@ -42,7 +42,20 @@ class ChatViewModel(
         val e2eeLabel: String = "Non chiffré de bout en bout",
         val canDelete: Boolean = false,
         val closing: Boolean = false,
+        /** Réponse en cours : identifiant du message cité, `null` quand aucune. */
+        val replyToId: String? = null,
+        val replyToPreview: String? = null,
+        /** Recherche locale dans la conversation. */
+        val searchQuery: String = "",
+        /** Réactions par message : emoji -> nombre. */
+        val reactions: Map<String, Map<String, Int>> = emptyMap(),
+        val renameDialogOpen: Boolean = false,
+        val renameText: String = "",
     )
+
+    companion object {
+        val QUICK_EMOJIS = listOf("🍅", "❤️", "👍", "😂", "😮", "🙏")
+    }
 
     private val conversationId = conversationId
     private val text = MutableStateFlow("")
@@ -54,6 +67,11 @@ class ChatViewModel(
     private val pollQuestion = MutableStateFlow("")
     private val pollOptions = MutableStateFlow(listOf("", ""))
     private val pollError = MutableStateFlow<String?>(null)
+    private val replyToId = MutableStateFlow<String?>(null)
+    private val searchQuery = MutableStateFlow("")
+    private val reactions = MutableStateFlow<Map<String, Map<String, Int>>>(emptyMap())
+    private val renameDialogOpen = MutableStateFlow(false)
+    private val renameText = MutableStateFlow("")
 
     /** Set once the conversation is left or deleted: the screen closes itself. */
     val closed = MutableStateFlow(false)
@@ -71,32 +89,48 @@ class ChatViewModel(
         container.messaging.observeMessages(conversationId),
         combine(text, sending) { t, s -> t to s },
         combine(error, container.networkMonitor.status()) { e, n -> e to n },
-        // `combine` n'accepte que cinq flux typés : le reste est regroupé explicitement.
         combine(
             combine(canDelete, closing) { c, s -> c to s },
             combine(pollDialogOpen, pollQuestion, pollOptions) { o, q, opts -> Triple(o, q, opts) },
+            combine(replyToId, searchQuery) { r, q -> r to q },
+            combine(reactions, renameDialogOpen, renameText) { reacts, dialog, name -> Triple(reacts, dialog, name) },
             pollError,
-        ) { rights, pollState, pollFailure -> Triple(rights, pollState, pollFailure) },
-    ) { conversation, allMessages, input, errNetwork, pollFields ->
+        ) { rights, pollState, replySearch, renameState, pollFailure ->
+            listOf(rights, pollState, replySearch, renameState, pollFailure)
+        },
+    ) { conversation, allMessages, input, errNetwork, misc ->
         val (currentText, isSending) = input
         val (currentError, network) = errNetwork
-        val (rights, pollState, pollFailure) = pollFields
+        @Suppress("UNCHECKED_CAST")
+        val rights = misc[0] as Pair<Boolean, Boolean>
+        @Suppress("UNCHECKED_CAST")
+        val pollState = misc[1] as Triple<Boolean, String, List<String>>
+        @Suppress("UNCHECKED_CAST")
+        val replySearch = misc[2] as Pair<String?, String>
+        @Suppress("UNCHECKED_CAST")
+        val renameState = misc[3] as Triple<Map<String, Map<String, Int>>, Boolean, String>
+        val pollFailure = misc[4] as String?
         val (mayDelete, isClosing) = rights
         val (dialogOpen, question, options) = pollState
+        val (replyId, query) = replySearch
+        val (reacts, renameOpen, renameValue) = renameState
         val myId = container.session.currentUserId
         val visible = allMessages.filterNot {
             PollCodec.isVote(it.body) || ConversationExtras.isCall(it.body)
         }
+        val filtered = if (query.isBlank()) visible
+        else visible.filter { it.body.contains(query.trim(), ignoreCase = true) }
         val polls = allMessages
             .mapNotNull { message ->
-                PollCodec.decodePoll(message.body)?.let { poll ->
+                PollCodec.decodePoll(message.body)?.let {
                     message.id to PollCodec.tally(allMessages, message.id, myId)
                 }
             }
             .toMap()
+        val replyPreview = replyId?.let { id -> visible.firstOrNull { it.id == id }?.body?.take(120) }
         UiState(
             conversation = conversation,
-            messages = visible,
+            messages = filtered,
             polls = polls,
             pollDialogOpen = dialogOpen,
             pollQuestion = question,
@@ -113,6 +147,12 @@ class ChatViewModel(
             e2eeLabel = container.e2ee.status.badgeLabel(),
             canDelete = mayDelete,
             closing = isClosing,
+            replyToId = replyId,
+            replyToPreview = replyPreview,
+            searchQuery = query,
+            reactions = reacts,
+            renameDialogOpen = renameOpen,
+            renameText = renameValue,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState())
 
@@ -127,25 +167,82 @@ class ChatViewModel(
         viewModelScope.launch {
             container.messaging.refreshMessages(conversationId)
             container.messaging.markConversationRead(conversationId)
+            refreshReactions()
             runCatching { container.sync.drain() }
         }
+    }
+
+    private suspend fun refreshReactions() {
+        val current = state.value.messages.map { it.id }
+        val result = container.messaging.fetchMessageReactions(current)
+        if (result is Outcome.Success) reactions.value = result.value
     }
 
     fun onTextChange(value: String) {
         text.value = value.take(4000)
     }
 
+    fun onSearchChange(value: String) {
+        searchQuery.value = value.take(80)
+    }
+
+    fun replyTo(message: Message) {
+        replyToId.value = message.id
+    }
+
+    fun cancelReply() {
+        replyToId.value = null
+    }
+
     fun send() {
         val body = text.value
         if (body.isBlank()) return
+        val reply = replyToId.value
         viewModelScope.launch {
             sending.value = true
             text.value = ""
-            val result = container.messaging.send(conversationId, body)
+            replyToId.value = null
+            val result = container.messaging.send(conversationId, body, replyToId = reply)
             sending.value = false
             if (result is Outcome.Failure && !result.error.isOffline) {
                 error.value = result.error
             }
+            refreshReactions()
+        }
+    }
+
+    fun react(messageId: String, emoji: String) {
+        viewModelScope.launch {
+            val mine = state.value.reactions[messageId]?.containsKey(emoji) == true &&
+                state.value.myId != null
+            // Optimiste : l'API dira si la migration 0010 manque, sans rien inventer.
+            val result = container.messaging.toggleMessageReaction(messageId, emoji, currentlyReacted = false)
+            if (result is Outcome.Failure) {
+                error.value = result.error
+            } else {
+                refreshReactions()
+            }
+        }
+    }
+
+    fun openRename() {
+        renameText.value = state.value.conversation?.title.orEmpty()
+        renameDialogOpen.value = true
+    }
+
+    fun onRenameChange(value: String) {
+        renameText.value = value.take(80)
+    }
+
+    fun closeRename() {
+        renameDialogOpen.value = false
+    }
+
+    fun confirmRename() {
+        viewModelScope.launch {
+            val result = container.messaging.renameConversation(conversationId, renameText.value)
+            renameDialogOpen.value = false
+            if (result is Outcome.Failure) error.value = result.error
         }
     }
 

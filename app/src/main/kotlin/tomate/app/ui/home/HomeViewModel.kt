@@ -243,6 +243,36 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         }
     }
 
+    private val editingPost = MutableStateFlow<Post?>(null)
+    private val editText = MutableStateFlow("")
+
+    fun startEdit(post: Post) {
+        editingPost.value = post
+        editText.value = post.body
+    }
+
+    fun onEditChange(value: String) {
+        editText.value = value.take(2000)
+    }
+
+    fun cancelEdit() {
+        editingPost.value = null
+    }
+
+    fun confirmEdit() {
+        val post = editingPost.value ?: return
+        val body = editText.value
+        viewModelScope.launch {
+            when (val result = container.feed.editPost(post.id, body)) {
+                is Outcome.Success -> editingPost.value = null
+                is Outcome.Failure -> error.value = result.error
+            }
+        }
+    }
+
+    fun editingState(): kotlinx.coroutines.flow.Flow<Pair<Post?, String>> =
+        kotlinx.coroutines.flow.combine(editingPost, editText) { p, t -> p to t }
+
     fun react(post: Post) {
         viewModelScope.launch {
             val result = container.feed.toggleReaction(post.id, post.reactedByMe)

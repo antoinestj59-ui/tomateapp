@@ -1,7 +1,7 @@
-# STATUS — TOMATE 0.3.0
+# STATUS — TOMATE 0.4.0
 
-Dernière vérification : **10 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
-navigateur cloud Chromium pour la PWA.
+Dernière vérification : **10 novembre 2026** (bac à sable cloud, JDK Temurin 21.0.13, Gradle 9.9.0, AGP 9.5.1) et
+contrôle syntaxique Node pour la PWA.
 
 Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est déclaré comme tel.
 
@@ -471,3 +471,51 @@ Publication `49deae70-1bbe-4310-a0bb-ed374c99658c` (« Apéro TOMATE ») :
   « opération(s) refusée(s) » avec leur raison : **Réessayer** les rejoue maintenant sans doublon,
   **Abandonner** les efface. Si elles échouent encore, la raison exacte sera affichée à l'écran.
 - Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009` (pas de clé `service_role`).
+
+## 2 duodecies. Itération 0.4.0 — refonte expressive, réponses, réactions, édition (10 novembre 2026)
+
+Branche : `tomate/mission-refonte-produit`.
+
+### Refonte graphique (code réel, pas une maquette)
+
+| Élément | Fichier | État |
+|---|---|---|
+| Palette expressive (conteneurs `surfaceContainer*`, primaire tomate recalibré, statuts conservés) | `core/.../theme/Color.kt` | compilé |
+| Logo tomate vectoriel (Canvas, sans dépendance d'image) + avatars de repli | `core/.../components/TomateLogo.kt` (nouveau) | compilé |
+| Navigation expressive : icônes remplies/contours selon la sélection | `TomateDestination.kt`, `TomateApp.kt` | compilé |
+| Cartes expressives : `PostCard`, `ConversationRow` en `surfaceContainer` + `extraLarge`, hiérarchie resserrée | `SharedComponents.kt` | compilé |
+| Bulles expressives : asymétriques, citation de réponse, état de livraison honnête | `SharedComponents.kt` | compilé |
+| Logo dans la barre d'accueil | `HomeScreen.kt` | compilé |
+| PWA : mêmes formes/couleurs, nouveaux styles citation/outils/chips/bandeau de réponse | `web/css/app.css` | `node --check` OK |
+
+### Fonctionnel (sans migration pour l'existant, fondation + repli honnête pour le reste)
+
+| Fonction | Base servie | État |
+|---|---|---|
+| Répondre à un message (citation affichée, `reply_to_id` envoyé) | colonnes existantes | Android + PWA, file idempotente |
+| Recherche locale dans la conversation | aucune (filtre local) | Android + PWA |
+| Modifier une publication (+ détail) | `posts_update_author` existante | Android + PWA (`post_update` rejouée par les deux files) |
+| Renommer un groupe | `conversations_update_member` existante | Android + PWA (`conversation_rename` rejouée) |
+| Réactions aux messages (🍅 ❤️ 👍…) | **migration `0010_message_reactions.sql` à appliquer** | code livré, repli explicite « Réactions non activées : appliquez la migration 0010… » tant qu'elle manque, file `message_reaction_add/remove` prête |
+| `ALL_IN_ONE.sql` inclut désormais `0007`→`0010` (en-tête corrigé) | — | fichier à jour |
+
+### Vérifications réellement exécutées
+
+| Test | Résultat |
+|---|---|
+| `:core` + `:data` + `:net` + `:app` (tests unitaires JVM) | **57 tests, 0 échec, 0 erreur** (dont `SyncEngineTest` passé de 8 à 11 : `post_update`, `conversation_rename`, `message_reaction_add`) |
+| `:app:testDebugUnitTest` (dont `UiScreenshotTest` Robolectric) | **BUILD SUCCESSFUL** |
+| `:app:assembleDebug` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.4.0-debug.apk` (71 Mo, `versionCode 14`) |
+| `node --check web/js/app.js web/js/queue.js` | OK |
+
+### Limites de cette itération (déclarées, pas simulées)
+
+- **Aucun appareil ni émulateur** : l'APK 0.4.0 est compilé, pas exécuté sur téléphone ; les écrans
+  réécrits (bulles, cartes, dialogue d'édition) ne sont pas vérifiés visuellement ici.
+- Les **réactions aux messages** exigent la migration `0010` : sans elle, l'app l'annonce au lieu
+  d'inventer un état.
+- La PWA n'a pas été rejouée contre le serveur ici (aucune clé dans cet environnement) : les
+  nouveaux chemins (`post_update`, `conversation_rename`, `message_reactions`) suivent les mêmes
+  conventions que les chemins déjà vérifiés (`Prefer`, `on_conflict`, file rejouable).
+- Toujours non entamé : E2EE réel, relais A→B→C sur trois téléphones, modération administrateur,
+  assistant, appels de groupe.

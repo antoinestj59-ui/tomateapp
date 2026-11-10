@@ -63,8 +63,9 @@ fun TomateApp(
             if (showBottomBar) {
                 NavigationBar {
                     TomateDestination.entries.forEach { destination ->
+                        val selected = currentRoute == destination.route
                         NavigationBarItem(
-                            selected = currentRoute == destination.route,
+                            selected = selected,
                             onClick = {
                                 if (currentRoute != destination.route) {
                                     navController.navigate(destination.route) {
@@ -76,7 +77,12 @@ fun TomateApp(
                                     }
                                 }
                             },
-                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            icon = {
+                                Icon(
+                                    if (selected) destination.selectedIcon else destination.icon,
+                                    contentDescription = destination.label,
+                                )
+                            },
                             label = { NavigationTabLabel(destination.label) },
                         )
                     }

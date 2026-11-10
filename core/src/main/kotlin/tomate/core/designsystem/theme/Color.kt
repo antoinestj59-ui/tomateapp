@@ -5,84 +5,97 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
 /**
- * Centralised colour tokens for TOMATE. Nothing in the UI layer should hardcode a colour:
- * every screen reads the MaterialTheme colour scheme or the [TomateStatusColors].
+ * Identité TOMATE — Material 3 Expressive.
+ *
+ * Rouge tomate employé avec modération : primaire pour les actions, conteneurs tonals pour
+ * les surfaces. Fonds clairs légèrement chauds, sombres profonds et soignés.
  */
 
-// Brand
-val TomatoRed = Color(0xFFC0392B)
-val TomatoRedDeep = Color(0xFF7C2418)
+// Marque
+val TomatoRed = Color(0xFFE03A24)
+val TomatoRedDeep = Color(0xFF8C1D10)
 val TomatoFlesh = Color(0xFFFF8A73)
-val TomatoLeaf = Color(0xFF4C6B3C)
+val TomatoLeaf = Color(0xFF3E6B34)
+val TomatoAmber = Color(0xFFE8A100)
 
-// Neutrals (warm, tomato-tinted)
-val WarmInk = Color(0xFF231917)
-val WarmSurface = Color(0xFFFFF8F6)
-val WarmSurfaceVariant = Color(0xFFF5DED8)
-val WarmOutline = Color(0xFF85736E)
-val WarmOutlineVariant = Color(0xFFD8C2BC)
+// Surfaces chaudes
+val WarmInk = Color(0xFF221614)
+val WarmSurface = Color(0xFFFFF7F3)
+val WarmSurfaceVariant = Color(0xFFF6E2D9)
+val WarmOutline = Color(0xFF85736C)
+val WarmOutlineVariant = Color(0xFFE4CFC5)
 
 private val LightScheme = lightColorScheme(
     primary = TomatoRed,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDAD3),
-    onPrimaryContainer = Color(0xFF3F0A03),
+    primaryContainer = Color(0xFFFFDAD1),
+    onPrimaryContainer = Color(0xFF410B02),
     inversePrimary = TomatoFlesh,
-    secondary = Color(0xFF77574E),
+    secondary = Color(0xFF6B4B3F),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFFDBD1),
-    onSecondaryContainer = Color(0xFF2C160F),
-    tertiary = Color(0xFF6B5D2E),
+    secondaryContainer = Color(0xFFFFDBCF),
+    onSecondaryContainer = Color(0xFF2A160E),
+    tertiary = TomatoLeaf,
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFF5E1A7),
-    onTertiaryContainer = Color(0xFF231B00),
-    error = Color(0xFFB3261E),
+    tertiaryContainer = Color(0xFFBDF0B2),
+    onTertiaryContainer = Color(0xFF02210A),
+    error = Color(0xFFBA1A1A),
     onError = Color.White,
-    errorContainer = Color(0xFFF9DEDC),
-    onErrorContainer = Color(0xFF410E0B),
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
     background = WarmSurface,
     onBackground = WarmInk,
     surface = WarmSurface,
     onSurface = WarmInk,
     surfaceVariant = WarmSurfaceVariant,
-    onSurfaceVariant = Color(0xFF53433F),
+    onSurfaceVariant = Color(0xFF53433D),
     surfaceTint = TomatoRed,
-    inverseSurface = Color(0xFF3A2E2C),
-    inverseOnSurface = Color(0xFFFFEDE8),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFFF1EA),
+    surfaceContainer = Color(0xFFFBE9E1),
+    surfaceContainerHigh = Color(0xFFF5DED5),
+    surfaceContainerHighest = Color(0xFFEDD2C7),
+    inverseSurface = Color(0xFF382925),
+    inverseOnSurface = Color(0xFFFFEDE7),
     outline = WarmOutline,
     outlineVariant = WarmOutlineVariant,
     scrim = Color.Black,
 )
 
 private val DarkScheme = darkColorScheme(
-    primary = Color(0xFFFFB4A6),
-    onPrimary = Color(0xFF641E12),
-    primaryContainer = Color(0xFF8C2B1C),
-    onPrimaryContainer = Color(0xFFFFDAD3),
+    primary = Color(0xFFFFB4A3),
+    onPrimary = Color(0xFF680E00),
+    primaryContainer = TomatoRedDeep,
+    onPrimaryContainer = Color(0xFFFFDAD1),
     inversePrimary = TomatoRed,
-    secondary = Color(0xFFE7BDB2),
-    onSecondary = Color(0xFF442A22),
-    secondaryContainer = Color(0xFF5D4038),
-    onSecondaryContainer = Color(0xFFFFDBD1),
-    tertiary = Color(0xFFD8C58D),
-    onTertiary = Color(0xFF3A2F05),
-    tertiaryContainer = Color(0xFF524619),
-    onTertiaryContainer = Color(0xFFF5E1A7),
+    secondary = Color(0xFFE7BDB0),
+    onSecondary = Color(0xFF442A21),
+    secondaryContainer = Color(0xFF5D4037),
+    onSecondaryContainer = Color(0xFFFFDBCF),
+    tertiary = Color(0xFF9ED69A),
+    onTertiary = Color(0xFF04310A),
+    tertiaryContainer = Color(0xFF1C4E22),
+    onTertiaryContainer = Color(0xFFBDF0B2),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF1A1110),
-    onBackground = Color(0xFFF1DFDA),
-    surface = Color(0xFF1A1110),
-    onSurface = Color(0xFFF1DFDA),
-    surfaceVariant = Color(0xFF53433F),
-    onSurfaceVariant = Color(0xFFD8C2BC),
-    surfaceTint = Color(0xFFFFB4A6),
-    inverseSurface = Color(0xFFF1DFDA),
-    inverseOnSurface = Color(0xFF3A2E2C),
-    outline = Color(0xFFA08C86),
-    outlineVariant = Color(0xFF53433F),
+    background = Color(0xFF171110),
+    onBackground = Color(0xFFF3DFD8),
+    surface = Color(0xFF171110),
+    onSurface = Color(0xFFF3DFD8),
+    surfaceVariant = Color(0xFF53433D),
+    onSurfaceVariant = Color(0xFFD8C2B9),
+    surfaceTint = Color(0xFFFFB4A3),
+    surfaceContainerLowest = Color(0xFF100C0B),
+    surfaceContainerLow = Color(0xFF1F1A18),
+    surfaceContainer = Color(0xFF241E1C),
+    surfaceContainerHigh = Color(0xFF2E2724),
+    surfaceContainerHighest = Color(0xFF3A3230),
+    inverseSurface = Color(0xFFF3DFD8),
+    inverseOnSurface = Color(0xFF382925),
+    outline = Color(0xFFA08C85),
+    outlineVariant = Color(0xFF53433D),
     scrim = Color.Black,
 )
 
@@ -90,7 +103,7 @@ fun tomateLightColorScheme() = LightScheme
 
 fun tomateDarkColorScheme() = DarkScheme
 
-/** Semantic colours that Material 3 does not model directly (network / moderation states). */
+/** Couleurs sémantiques que Material 3 ne modélise pas (réseau, modération). */
 data class TomateStatusColors(
     val success: Color,
     val onSuccess: Color,
@@ -107,25 +120,25 @@ data class TomateStatusColors(
 )
 
 val LightStatusColors = TomateStatusColors(
-    success = Color(0xFF2E6B3E),
+    success = Color(0xFF2E6B34),
     onSuccess = Color.White,
-    successContainer = Color(0xFFB8F0BE),
-    onSuccessContainer = Color(0xFF00210B),
+    successContainer = Color(0xFFBDF0B2),
+    onSuccessContainer = Color(0xFF02210A),
     warning = Color(0xFF7A5900),
     onWarning = Color.White,
     warningContainer = Color(0xFFFFDEA6),
     onWarningContainer = Color(0xFF261900),
     info = Color(0xFF1F5C8B),
     onInfo = Color.White,
-    infoContainer = Color(0xFFCFE5FF),
+    infoContainer = Color(0xFFD3E6FF),
     onInfoContainer = Color(0xFF001D33),
 )
 
 val DarkStatusColors = TomateStatusColors(
-    success = Color(0xFF9CD49F),
+    success = Color(0xFF9ED69A),
     onSuccess = Color(0xFF00391A),
-    successContainer = Color(0xFF14522A),
-    onSuccessContainer = Color(0xFFB8F0BE),
+    successContainer = Color(0xFF1C4E22),
+    onSuccessContainer = Color(0xFFBDF0B2),
     warning = Color(0xFFF0C14B),
     onWarning = Color(0xFF3F2E00),
     warningContainer = Color(0xFF5C4300),
@@ -133,5 +146,5 @@ val DarkStatusColors = TomateStatusColors(
     info = Color(0xFF9CCAFF),
     onInfo = Color(0xFF003354),
     infoContainer = Color(0xFF00496F),
-    onInfoContainer = Color(0xFFCFE5FF),
+    onInfoContainer = Color(0xFFD3E6FF),
 )

@@ -150,7 +150,13 @@ fun HomeScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(text = "TOMATE", style = MaterialTheme.typography.headlineMedium) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    tomate.core.designsystem.components.TomateLogo(size = 32.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(text = "TOMATE", style = MaterialTheme.typography.headlineMedium)
+                }
+            },
             actions = {
                 TomateNetworkBadge(status = network)
                 IconButton(onClick = onSyncNow) {
@@ -288,6 +294,11 @@ fun HomeScreen(
                         post = post,
                         onOpen = { onOpenPost(post.id) },
                         onReact = { viewModel.react(post) },
+                        onEdit = if (post.authorId == state.myId) {
+                            { viewModel.startEdit(post) }
+                        } else {
+                            null
+                        },
                     )
                 }
             }
@@ -322,6 +333,31 @@ fun HomeScreen(
 
     state.eventDraft?.let { draft ->
         EventComposer(draft = draft, viewModel = viewModel)
+    }
+
+    val editing by viewModel.editingState().collectAsStateWithLifecycle(initialValue = null to "")
+    val (editingPost, editBody) = editing
+    if (editingPost != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelEdit,
+            title = { Text("Modifier la publication") },
+            text = {
+                TomateTextField(
+                    value = editBody,
+                    onValueChange = viewModel::onEditChange,
+                    label = "Publication",
+                    singleLine = false,
+                    minLines = 3,
+                    maxLines = 8,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmEdit) { Text("Enregistrer") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelEdit) { Text("Annuler") }
+            },
+        )
     }
 }
 

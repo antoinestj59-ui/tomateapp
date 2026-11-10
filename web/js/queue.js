@@ -24,6 +24,10 @@ const ENDPOINTS = {
   conversation_create: (p) => ['conversations', { method: 'POST', body: p, prefer: 'return=minimal' }],
   conversation_member_add: (p) => ['conversation_members', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'conversation_id,user_id' }],
   message_send: (p) => ['messages', { method: 'POST', body: p, prefer: 'resolution=merge-duplicates', onConflict: 'id' }],
+  post_update: (p) => ['posts', { method: 'PATCH', query: `id=eq.${p.id}`, body: { body: p.body } }],
+  conversation_rename: (p) => ['conversations', { method: 'PATCH', query: `id=eq.${p.conversation_id}`, body: { title: p.title } }],
+  message_reaction_add: (p) => ['message_reactions', { method: 'POST', body: p, prefer: 'return=minimal,resolution=ignore-duplicates', onConflict: 'message_id,user_id,emoji' }],
+  message_reaction_remove: (p) => ['message_reactions', { method: 'DELETE', query: `message_id=eq.${p.message_id}&user_id=eq.${p.user_id}&emoji=eq.${encodeURIComponent(p.emoji)}` }],
   // Plain insert: stories has no UPDATE policy, a merge-duplicates would be refused (403).
   story_create: (p) => ['stories', { method: 'POST', body: p, prefer: 'return=minimal' }],
   // story_views has no UPDATE policy: ignoring the duplicate is the only correct replay.

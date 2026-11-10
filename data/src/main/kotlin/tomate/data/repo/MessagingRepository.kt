@@ -460,6 +460,99 @@ class MessagingRepository(
         conversationDao.clearUnread(conversationId)
     }
 
+    /**
+     * Renomme une conversation de groupe. La politique `conversations_update_member`
+     * l'autorise déjà aux membres : aucune migration requise.
+     */
+    suspend fun renameConversation(conversationId: String, title: String): Outcome<Unit> {
+        val trimmed = title.trim().take(80)
+        if (trimmed.isEmpty()) {
+            return Outcome.Failure(AppError.Validation("empty_title", "Le titre est vide."))
+        }
+        val current = conversationDao.byId(conversationId) ?: return Outcome.Failure(AppError.NotFound())
+        conversationDao.upsert(current.copy(title = trimmed))
+        val payload = """{"conversation_id":"$conversationId","title":${quoteJson(trimmed)}}"""
+        if (session.isLocalAccount()) {
+            enqueue("conversation_rename", conversationId, payload)
+            return Outcome.Success(Unit)
+        }
+        return when (val remote = api.update("conversations", listOf("id" to "eq.$conversationId"), payload)) {
+            is Outcome.Success -> Outcome.Success(Unit)
+            is Outcome.Failure -> {
+                enqueue("conversation_rename", conversationId, payload)
+                Outcome.Failure(remote.error)
+            }
+        }
+    }
+
+    /** Réactions aux messages : table `message_reactions` (migration 0010). */
+    suspend fun toggleMessageReaction(messageId: String, emoji: String, currentlyReacted: Boolean): Outcome<Unit> {
+        val me = session.ensureActor().getOrNull()?.userId
+            ?: return Outcome.Failure(AppError.Unauthorized())
+        val message = messageDao.byId(messageId) ?: return Outcome.Failure(AppError.NotFound())
+        val payload =
+            """{"message_id":"$messageId","user_id":"$me","emoji":${quoteJson(emoji)}}"""
+        if (SessionManager.isLocalId(me)) {
+            enqueue(if (currentlyReacted) "message_reaction_remove" else "message_reaction_add", "$messageId:$me:$emoji", payload)
+            return Outcome.Success(Unit)
+        }
+        if (currentlyReacted) {
+            val filter = listOf(
+                "message_id" to "eq.$messageId",
+                "user_id" to "eq.$me",
+                "emoji" to "eq.$emoji",
+            )
+            return when (val remote = api.delete("message_reactions", filter)) {
+                is Outcome.Success -> Outcome.Success(Unit)
+                is Outcome.Failure -> {
+                    if (remote.error is AppError.SchemaMissing) {
+                        return Outcome.Failure(
+                            AppError.SchemaMissing("Réactions non activées : appliquez la migration 0010_message_reactions.sql."),
+                        )
+                    }
+                    enqueue("message_reaction_remove", "$messageId:$me:$emoji", payload)
+                    Outcome.Failure(remote.error)
+                }
+            }
+        }
+        return when (val remote = api.insert("message_reactions", payload, ignoreDuplicates = true, onConflict = "message_id,user_id,emoji", representation = false)) {
+            is Outcome.Success -> Outcome.Success(Unit)
+            is Outcome.Failure -> {
+                if (remote.error is AppError.SchemaMissing) {
+                    return Outcome.Failure(
+                        AppError.SchemaMissing("Réactions non activées : appliquez la migration 0010_message_reactions.sql."),
+                    )
+                }
+                enqueue("message_reaction_add", "$messageId:$me:$emoji", payload)
+                Outcome.Failure(remote.error)
+            }
+        }
+    }
+
+    /** Compte les réactions par emoji pour les messages donnés (lecture seule, sans cache). */
+    suspend fun fetchMessageReactions(messageIds: List<String>): Outcome<Map<String, Map<String, Int>>> {
+        if (messageIds.isEmpty() || session.isLocalAccount()) return Outcome.Success(emptyMap())
+        val filter = "in.(" + messageIds.joinToString(",") + ")"
+        return when (val response = api.select("message_reactions", listOf("select" to "message_id,emoji", "message_id" to filter))) {
+            is Outcome.Failure -> {
+                if (response.error is AppError.SchemaMissing) Outcome.Success(emptyMap()) else response
+            }
+            is Outcome.Success -> {
+                val tally = mutableMapOf<String, MutableMap<String, Int>>()
+                runCatching {
+                    val array = SupabaseApi.json.parseToJsonElement(response.value) as? kotlinx.serialization.json.JsonArray
+                    array?.forEach { row ->
+                        val obj = row as? kotlinx.serialization.json.JsonObject ?: return@forEach
+                        val mid = obj["message_id"]?.toString()?.trim('"') ?: return@forEach
+                        val emoji = obj["emoji"]?.toString()?.trim('"') ?: return@forEach
+                        tally.getOrPut(mid) { mutableMapOf() }.merge(emoji, 1, Int::plus)
+                    }
+                }
+                Outcome.Success(tally)
+            }
+        }
+    }
+
     suspend fun pendingMessages(limit: Int = 20): List<Message> =
         messageDao.pendingMessages(limit).map { it.toDomain() }
 
@@ -499,4 +592,20 @@ class MessagingRepository(
         const val MAX_MESSAGE_LENGTH = 4000
         private const val DAY_MS = 86_400_000L
     }
+}
+
+/** Minimal JSON string quoting (avoids a serialization dependency for one scalar). */
+internal fun quoteJson(value: String): String = buildString {
+    append('"')
+    for (c in value) {
+        when (c) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+        }
+    }
+    append('"')
 }

@@ -109,6 +109,9 @@ const S = {
   turnBusy: false,
   call: null,
   callWatch: null,
+  replyTo: null,
+  chatSearch: '',
+  messageReactions: {},
 };
 
 const ONLINE = () => navigator.onLine;
@@ -610,7 +613,7 @@ function postItem(post) {
         <button class="action" data-act="open-post" data-id="${esc(post.id)}">
           ${ICON.comment}<span>${post.comment_count ?? 0}</span>
         </button>
-        ${mine ? `<button class="action" data-act="delete-post" data-id="${esc(post.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
+        ${mine ? `<button class="action" data-act="edit-post" data-id="${esc(post.id)}" aria-label="Modifier">✏️</button><button class="action" data-act="delete-post" data-id="${esc(post.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
       </div>
     </div>
   </article>`;
@@ -1130,6 +1133,83 @@ async function deletePost(id) {
   await syncNow();
 }
 
+async function editPost(id) {
+  const post = S.feed.find((p) => p.id === id);
+  if (!post) return toast('Publication introuvable.');
+  if (post.author_id !== S.profile?.id) return toast("Seul l'auteur peut modifier cette publication.");
+  const next = await promptDialog({ title: 'Modifier la publication', label: 'Publication', placeholder: post.body });
+  if (next === null) return;
+  const body = next.trim().slice(0, 2000);
+  if (!body) return toast('Le message est vide.');
+  post.body = body;
+  await cacheSet('feed', S.feed);
+  await enqueue('post_update', { id, body });
+  render();
+  await syncNow();
+  toast('Publication modifiée.');
+}
+
+async function toggleMessageReaction(messageId, emoji) {
+  const fallback = emoji || '🍅';
+  try {
+    await ensureRemoteSession();
+    const mine = S.messageReactions?.[messageId]?.[fallback] > 0;
+    if (mine) {
+      await rest('message_reactions', {
+        method: 'DELETE',
+        query: `message_id=eq.${messageId}&user_id=eq.${S.profile.id}&emoji=eq.${encodeURIComponent(fallback)}`,
+      });
+    } else {
+      await rest('message_reactions', {
+        method: 'POST',
+        prefer: 'return=minimal,resolution=ignore-duplicates',
+        onConflict: 'message_id,user_id,emoji',
+        body: { message_id: messageId, user_id: S.profile.id, emoji: fallback },
+      });
+    }
+    await loadMessageReactions(S.param);
+  } catch (error) {
+    const text = humanError(error);
+    if (/0010|message_reactions|schema/i.test(text)) {
+      toast("Réactions non activées : appliquez la migration 0010_message_reactions.sql.");
+    } else {
+      await enqueue('message_reaction_add', { message_id: messageId, user_id: S.profile.id, emoji: fallback });
+      toast(text);
+    }
+  }
+  render();
+}
+
+async function loadMessageReactions(conversationId) {
+  try {
+    const messages = S.messages.filter((m) => m.conversation_id === conversationId || !m.conversation_id);
+    if (messages.length === 0) { S.messageReactions = {}; return; }
+    const ids = messages.map((m) => m.id).join(',');
+    const rows = await rest('message_reactions', { query: `select=message_id,emoji&message_id=in.(${ids})` });
+    const tally = {};
+    for (const row of rows) {
+      tally[row.message_id] = tally[row.message_id] || {};
+      tally[row.message_id][row.emoji] = (tally[row.message_id][row.emoji] || 0) + 1;
+    }
+    S.messageReactions = tally;
+  } catch {
+    S.messageReactions = S.messageReactions || {};
+  }
+}
+
+async function renameConversation(id) {
+  const conversation = S.conversations.find((c) => c.id === id);
+  const next = await promptDialog({ title: 'Renommer le groupe', label: 'Nom du groupe', placeholder: conversation?.title || 'Groupe' });
+  if (next === null) return;
+  const title = next.trim().slice(0, 80);
+  if (!title) return toast('Le titre est vide.');
+  if (conversation) conversation.title = title;
+  await cacheSet('conversations', S.conversations);
+  await enqueue('conversation_rename', { conversation_id: id, title });
+  render();
+  await syncNow();
+}
+
 async function toggleLike(post) {
   post.reacted_by_me = !post.reacted_by_me;
   post.reaction_count = Math.max(0, (post.reaction_count ?? 0) + (post.reacted_by_me ? 1 : -1));
@@ -1277,6 +1357,8 @@ function chatView() {
   const conversation = S.conversations.find((c) => c.id === S.param);
   return shell(`
     ${S.lastError ? notice(S.lastError, 'error', true) : ''}
+    <div class="card" style="padding:10px 14px"><input class="input" data-chat-search placeholder="Rechercher dans la conversation…" value="${esc(S.chatSearch || '')}" aria-label="Rechercher dans la conversation" /></div>
+    ${S.replyTo ? `<div class="card reply-banner"><span>Réponse : ${esc((S.messages.find((m) => m.id === S.replyTo)?.body || '').slice(0, 100))}</span><button class="icon-btn" data-act="msg-reply-cancel" aria-label="Annuler la réponse">✕</button></div>` : ''}
     <div class="card" style="min-height:40vh;display:flex;flex-direction:column;gap:8px;padding:14px">
       ${visibleMessages().length === 0 ? emptyState('💬', 'Aucun message.', 'Écrivez le premier message.') : visibleMessages().map(messageItem).join('')}
     </div>
@@ -1417,10 +1499,16 @@ function messageItem(message) {
   const poll = decodePoll(message.body);
   if (poll) return pollBubble(message, poll);
   const mine = message.sender_id === S.profile?.id;
-  return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:16px">
+  const quoted = message.reply_to_id ? S.messages.find((m) => m.id === message.reply_to_id)?.body?.slice(0, 120) : null;
+  const tally = (S.messageReactions && S.messageReactions[message.id]) || {};
+  const chips = Object.entries(tally).map(([emoji, count]) => `<button class="chip" data-act="msg-react" data-id="${esc(message.id)}" data-emoji="${esc(emoji)}">${esc(emoji)} ${count}</button>`).join('');
+  return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:18px">
+    ${quoted ? `<div class="quote">${esc(quoted)}</div>` : ''}
     ${messageMediaHtml(message)}
     ${message.body ? `<div style="white-space:pre-wrap">${esc(message.body)}</div>` : ''}
     <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
+    <div class="msg-tools"><button class="link" data-act="msg-reply" data-id="${esc(message.id)}">Répondre</button><span class="react-quick">${['🍅', '❤️', '👍'].map((e) => `<button class="link" data-act="msg-react" data-id="${esc(message.id)}" data-emoji="${e}">${e}</button>`).join('')}</span></div>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}
   </div>`;
 }
 
@@ -1480,6 +1568,7 @@ async function loadMessages(conversationId) {
     S.messages = [...rows, ...local.filter((m) => !rows.some((r) => r.id === m.id))];
     await cacheSet(key, S.messages);
     await resolveChatMedia(S.messages);
+    await loadMessageReactions(conversationId);
   } catch {
     // Cached messages stay readable.
   }
@@ -1503,10 +1592,12 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     }
   }
 
+  const replyTo = S.replyTo || null;
   const message = {
     id: crypto.randomUUID(),
     client_id: crypto.randomUUID(),
     conversation_id: conversationId,
+    reply_to_id: replyTo,
     sender_id: S.profile.id,
     body: text,
     media_path: attachment?.path ?? null,
@@ -1526,6 +1617,7 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     sender_id: message.sender_id,
     body: text,
     encrypted: false,
+    ...(replyTo ? { reply_to_id: replyTo } : {}),
     ...(attachment
       ? {
         media_path: attachment.path,
@@ -1537,6 +1629,7 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
   });
   if (S.chatMedia?.preview) URL.revokeObjectURL(S.chatMedia.preview);
   S.chatMedia = null;
+  S.replyTo = null;
   await resolveChatMedia([message]);
   render();
   await syncNow();
@@ -3097,6 +3190,23 @@ document.addEventListener('click', async (event) => {
       case 'delete-post':
         await deletePost(trigger.dataset.id);
         break;
+      case 'edit-post':
+        await editPost(trigger.dataset.id);
+        break;
+      case 'msg-reply':
+        S.replyTo = trigger.dataset.id;
+        render();
+        break;
+      case 'msg-reply-cancel':
+        S.replyTo = null;
+        render();
+        break;
+      case 'msg-react':
+        await toggleMessageReaction(trigger.dataset.id, trigger.dataset.emoji);
+        break;
+      case 'rename-chat':
+        await renameConversation(trigger.dataset.id);
+        break;
       case 'new-conversation':
         await newConversation();
         break;
@@ -3197,6 +3307,15 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  const chatSearch = event.target.closest('[data-chat-search]');
+  if (chatSearch) {
+    S.chatSearch = chatSearch.value.slice(0, 80);
+    const list = document.querySelector('.card');
+    render();
+    const back = document.querySelector('[data-chat-search]');
+    if (back) { back.focus(); back.setSelectionRange(back.value.length, back.value.length); }
+    return;
+  }
   const field = event.target;
   if (!field.matches('textarea[maxlength]')) return;
   const form = field.closest('form');
@@ -3432,7 +3551,10 @@ function isSignalMessage(body) {
 }
 
 function visibleMessages() {
-  return S.messages.filter((m) => !isVote(m.body) && !isSignalMessage(m.body));
+  const query = (S.chatSearch || '').trim().toLowerCase();
+  return S.messages
+    .filter((m) => !isVote(m.body) && !isSignalMessage(m.body))
+    .filter((m) => !query || (m.body || '').toLowerCase().includes(query));
 }
 
 function pollDialog() {

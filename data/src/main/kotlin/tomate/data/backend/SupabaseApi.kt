@@ -140,7 +140,7 @@ class SupabaseApi(
         readOrThrow(response)
     }
 
-    suspend fun update(
+    override suspend fun update(
         table: String,
         filter: List<Pair<String, String>>,
         body: String,

@@ -20,10 +20,14 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,7 +52,7 @@ import java.util.Date
 import java.util.Locale
 import tomate.core.designsystem.components.MetricPill
 import tomate.core.designsystem.components.TomateAvatar
-import tomate.core.designsystem.components.TomateCard
+import tomate.core.designsystem.components.TomateLogo
 import tomate.core.designsystem.theme.TomateSpacing
 import tomate.core.designsystem.theme.TomateTheme
 import tomate.core.model.Conversation
@@ -98,22 +102,35 @@ fun TomateRemoteImage(
 fun Long.formatTimestamp(): String =
     if (this <= 0L) "—" else timeFormat.format(Date(this))
 
+/**
+ * Carte de publication expressive : surface tonale, hiérarchie resserrée, logo en repli.
+ * Plus d'accumulation de cartes génériques : une seule surface par publication.
+ */
 @Composable
 fun PostCard(
     post: Post,
     onOpen: () -> Unit,
     onReact: () -> Unit,
     modifier: Modifier = Modifier,
-    /** Renseignés pour un événement quand l'écran connaît la participation réelle. */
     eventGoing: Int? = null,
     eventGoingByMe: Boolean = false,
-    /** Bouton « Je participe » : absent quand l'écran ne peut pas l'assumer. */
     onParticipate: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
-    TomateCard(modifier = modifier, onClick = onOpen) {
+    Surface(
+        onClick = onOpen,
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 1.dp,
+    ) {
         Column(modifier = Modifier.padding(TomateSpacing.l)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TomateAvatar(label = post.authorDisplayName.ifBlank { post.authorHandle })
+                if (post.authorHandle.isBlank()) {
+                    TomateLogo(size = 44.dp)
+                } else {
+                    TomateAvatar(label = post.authorDisplayName.ifBlank { post.authorHandle })
+                }
                 Spacer(Modifier.width(TomateSpacing.m))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -125,7 +142,7 @@ fun PostCard(
                     )
                     Text(
                         text = "@${post.authorHandle.ifBlank { "…" }} · ${post.createdAt.formatTimestamp()}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -155,7 +172,7 @@ fun PostCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(MaterialTheme.shapes.large)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             .clickable {
                                 runCatching {
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
@@ -197,18 +214,18 @@ fun PostCard(
                     )
                     Spacer(Modifier.width(TomateSpacing.m))
                 }
-                IconButton(onClick = onReact, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = onReact, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = if (post.reactedByMe) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                         contentDescription = if (post.reactedByMe) "Retirer la réaction" else "Réagir",
                         tint = if (post.reactedByMe) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(22.dp),
                     )
                 }
                 Text(
                     text = post.reactionCount.toString(),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.width(TomateSpacing.l))
@@ -221,9 +238,17 @@ fun PostCard(
                 Spacer(Modifier.width(TomateSpacing.xs))
                 Text(
                     text = post.commentCount.toString(),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(Modifier.weight(1f))
+                if (onEdit != null) {
+                    AssistChip(
+                        onClick = onEdit,
+                        label = { Text("Modifier") },
+                        colors = AssistChipDefaults.assistChipColors(),
+                    )
+                }
             }
         }
     }
@@ -235,7 +260,13 @@ fun ConversationRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    TomateCard(modifier = modifier, onClick = onClick) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 1.dp,
+    ) {
         Row(
             modifier = Modifier.padding(TomateSpacing.l),
             verticalAlignment = Alignment.CenterVertically,
@@ -255,7 +286,7 @@ fun ConversationRow(
                 )
                 Text(
                     text = conversation.lastMessagePreview.ifBlank { "Aucun message" },
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -264,7 +295,7 @@ fun ConversationRow(
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = conversation.lastMessageAt.formatTimestamp(),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (conversation.unreadCount > 0) {
@@ -280,28 +311,61 @@ fun ConversationRow(
     }
 }
 
+/**
+ * Bulle expressive : asymétrique, citation de réponse, état de livraison honnête.
+ * [replyPreview] est le début du message cité (résolu par l'écran depuis la liste).
+ */
 @Composable
 fun MessageBubble(
     message: Message,
     isMine: Boolean,
     modifier: Modifier = Modifier,
+    replyPreview: String? = null,
+    onReply: (() -> Unit)? = null,
 ) {
     val container = if (isMine) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceVariant
+    else MaterialTheme.colorScheme.surfaceContainerHighest
     val content = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    else MaterialTheme.colorScheme.onSurface
 
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
     ) {
-        androidx.compose.material3.Surface(
+        Surface(
             color = container,
             contentColor = content,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth(0.82f),
+            shape = if (isMine) {
+                MaterialTheme.shapes.large.copy(
+                    bottomEnd = androidx.compose.foundation.shape.CornerSize(6.dp),
+                )
+            } else {
+                MaterialTheme.shapes.large.copy(
+                    bottomStart = androidx.compose.foundation.shape.CornerSize(6.dp),
+                )
+            },
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth(0.85f),
         ) {
-            Column(modifier = Modifier.padding(TomateSpacing.m)) {
+            Column(modifier = Modifier.padding(horizontal = TomateSpacing.m, vertical = TomateSpacing.s)) {
+                val quote = replyPreview ?: message.replyToId?.let { "Réponse à un message" }
+                if (quote != null) {
+                    Surface(
+                        color = content.copy(alpha = 0.10f),
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = quote.take(120),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = content.copy(alpha = 0.9f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(TomateSpacing.s),
+                        )
+                    }
+                    Spacer(Modifier.height(TomateSpacing.xs))
+                }
                 Text(text = message.body, style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.height(TomateSpacing.xs))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -309,14 +373,23 @@ fun MessageBubble(
                         text = "${message.createdAt.formatTimestamp()} · ${message.deliveryState.label}",
                         style = MaterialTheme.typography.labelSmall,
                         color = content.copy(alpha = 0.75f),
+                        modifier = Modifier.weight(1f),
                     )
                     if (!message.encrypted) {
-                        Spacer(Modifier.width(TomateSpacing.xs))
                         Text(
                             text = "· non chiffré E2EE",
                             style = MaterialTheme.typography.labelSmall,
                             color = content.copy(alpha = 0.75f),
                         )
+                    }
+                    if (onReply != null) {
+                        IconButton(onClick = onReply, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                Icons.Filled.Reply,
+                                contentDescription = "Répondre",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
             }
