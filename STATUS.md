@@ -519,3 +519,37 @@ Branche : `tomate/mission-refonte-produit`.
   conventions que les chemins déjà vérifiés (`Prefer`, `on_conflict`, file rejouable).
 - Toujours non entamé : E2EE réel, relais A→B→C sur trois téléphones, modération administrateur,
   assistant, appels de groupe.
+
+### Rejeu réel contre le serveur (nuit du 10 novembre 2026, `tooling/verify_040_reactions.sh`)
+
+Après application de `0010` par le propriétaire, rejoué en HTTP réel avec deux comptes
+anonymes frais (clé publique uniquement, aucune donnée conservée) : **25 PASS / 26**.
+
+| Chemin vérifié | Résultat réel |
+|---|---|
+| `0010` appliquée (`GET message_reactions` → 200, pas `PGRST205`) | PASS |
+| Création profils A/B, conversation (201, membre auto via trigger), relecture | PASS |
+| Renommage (`PATCH conversations` + relecture du nouveau titre) | PASS |
+| Message + réponse (`reply_to_id` relu à l'identique) | PASS |
+| Réaction 🍅 (201, relecture 1 ligne), doublon **409** (pas de doublon) | PASS |
+| Non-membre : ajout **403**, lecture `[]` (RLS membre confirmée) | PASS |
+| Retrait réaction (204, relecture `[]`) | PASS |
+| Édition publication (`PATCH posts` + relecture, puis suppression réelle) | PASS |
+| Suppression conversation + cascade | **FAIL — voir ci-dessous** |
+| Nettoyage (profils A/B supprimés, cascade serveur vérifiée) | PASS |
+
+Deux constats honnêtes, reproduits chacun 3 fois minimum :
+
+1. **`POST /conversations` avec `Prefer: return=representation` → 403 (`42501`) sans créer
+   la ligne, alors que la même requête avec `return=minimal` → 201.** Les deux clients
+   (Android `representation = false`, PWA `prefer: 'return=minimal'`) utilisent déjà la forme
+   qui marche : aucun code applicatif n'est touché. Le script de vérification suit désormais
+   exactement le chemin des clients (écriture minimale + `GET` séparé). Cause PostgREST exacte
+   non établie ; effet 100 % reproductible, documenté dans le script.
+2. **`DELETE /conversations` (politique `conversations_delete_creator`, migration `0008`)
+   ne correspond à aucune ligne** : 204/200 avec `[]`, la conversation et ses messages restent.
+   `created_by` stocké = `auth.uid()` vérifié par relecture : c'est la politique `0008` qui
+   manque côté serveur (le propriétaire n'avait appliqué que `0010`). Conséquence : la
+   suppression de conversation de l'app croit réussir (204) sans rien effacer — **en attente
+   d'application de `0007`/`0008`/`0009`, toujours dues depuis 0.3.1.** Dès `0008` appliquée,
+   relancer `./tooling/verify_040_reactions.sh` (attendu : 26/26).
