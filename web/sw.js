@@ -1,5 +1,5 @@
 // Service worker TOMATE : la coquille de l'app reste utilisable hors ligne.
-const CACHE = 'tomate-shell-v33';
+const CACHE = 'tomate-shell-v34';
 const SHELL = [
   '/',
   '/index.html',
