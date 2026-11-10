@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -156,6 +158,11 @@ fun TomateInlineNotice(
     modifier: Modifier = Modifier,
     icon: ImageVector = Icons.Filled.CloudOff,
     tone: NoticeTone = NoticeTone.Info,
+    /**
+     * Ajoute une croix de fermeture. Un bandeau d'erreur sans issue restait affiché pour
+     * toujours, même une fois la cause disparue : il doit pouvoir être écarté.
+     */
+    onDismiss: (() -> Unit)? = null,
 ) {
     val status = TomateTheme.status
     val container = when (tone) {
@@ -180,7 +187,20 @@ fun TomateInlineNotice(
         ) {
             Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(TomateSpacing.s))
-            Text(text = text, style = MaterialTheme.typography.bodySmall)
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (onDismiss != null) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Fermer",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
         }
     }
 }

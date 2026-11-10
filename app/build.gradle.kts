@@ -17,8 +17,8 @@ android {
         applicationId = "app.tomate"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.3.0"
+        versionCode = 13
+        versionName = "0.3.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -85,6 +85,11 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Rendu Compose hors appareil : les défauts de mise en page doivent être vus, pas supposés.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.androidx.test.junit)

@@ -285,10 +285,40 @@ interface OutboxDao {
     suspend fun due(now: Long, limit: Int): List<OutboxEntity>
 
     @Query("SELECT COUNT(*) FROM outbox")
+    suspend fun total(): Int
+
+    /**
+     * Seules les opérations encore vivantes sont comptées : une entrée morte (voir [DEAD]) a
+     * épuisé ses tentatives et ne partira plus jamais toute seule. La compter laissait le
+     * bandeau « N opérations en attente » affiché indéfiniment alors que plus rien n'avançait.
+     */
+    @Query("SELECT COUNT(*) FROM outbox WHERE nextAttemptAt < 9223372036854775807")
     fun observeCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM outbox")
+    @Query("SELECT COUNT(*) FROM outbox WHERE nextAttemptAt < 9223372036854775807")
     suspend fun count(): Int
+
+    /** Opérations définitivement refusées : visibles, mais hors du décompte « en attente ». */
+    @Query("SELECT COUNT(*) FROM outbox WHERE nextAttemptAt = 9223372036854775807")
+    fun observeDeadCount(): Flow<Int>
+
+    @Query("SELECT * FROM outbox WHERE nextAttemptAt = 9223372036854775807 ORDER BY createdAt DESC LIMIT :limit")
+    suspend fun dead(limit: Int = 20): List<OutboxEntity>
+
+    /** La dernière raison de refus, pour l'afficher telle quelle à l'utilisateur. */
+    @Query(
+        "SELECT lastError FROM outbox WHERE nextAttemptAt = 9223372036854775807 " +
+            "ORDER BY createdAt DESC LIMIT 1",
+    )
+    fun observeLastFailure(): Flow<String?>
+
+    /** Remet les opérations refusées dans la file, avec un compteur de tentatives remis à zéro. */
+    @Query("UPDATE outbox SET attempts = 0, nextAttemptAt = 0, lastError = NULL WHERE nextAttemptAt = 9223372036854775807")
+    suspend fun reviveDead(): Int
+
+    /** Abandonne définitivement les opérations refusées, sur demande explicite de l'utilisateur. */
+    @Query("DELETE FROM outbox WHERE nextAttemptAt = 9223372036854775807")
+    suspend fun discardDead(): Int
 
     @Query("DELETE FROM outbox WHERE id = :id")
     suspend fun done(id: String)

@@ -94,8 +94,13 @@ class CommunityDetailViewModel(
         val community = state.value.community ?: return
         viewModelScope.launch {
             busy.value = true
+            error.value = null
             when (val result = container.communities.join(community.id, community.visibility)) {
-                is Outcome.Success -> runCatching { container.communities.refresh() }
+                is Outcome.Success -> {
+                    runCatching { container.communities.refresh() }
+                    // L'adhésion part aussi dans la file : on la vide tout de suite.
+                    runCatching { container.sync.drain() }
+                }
                 is Outcome.Failure -> error.value = result.error
             }
             busy.value = false
@@ -105,6 +110,7 @@ class CommunityDetailViewModel(
     fun leave() {
         viewModelScope.launch {
             busy.value = true
+            error.value = null
             when (val result = container.communities.leave(communityId)) {
                 is Outcome.Success -> runCatching { container.communities.refresh() }
                 is Outcome.Failure -> error.value = result.error

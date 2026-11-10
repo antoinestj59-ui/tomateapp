@@ -69,6 +69,8 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val error: AppError?,
         val network: NetworkStatus,
         val pendingOperations: Int,
+        val failedOperations: Int,
+        val lastFailure: String?,
         val hasProfile: Boolean,
         val myId: String?,
     )
@@ -84,6 +86,8 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val error: AppError? = null,
         val network: NetworkStatus = NetworkStatus.Checking,
         val pendingOperations: Int = 0,
+        val failedOperations: Int = 0,
+        val lastFailure: String? = null,
         val hasProfile: Boolean = false,
         val myId: String? = null,
         val storyDraft: StoryDraft? = null,
@@ -98,23 +102,35 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
     private val eventDraft = MutableStateFlow<EventDraft?>(null)
     private val now = MutableStateFlow(System.currentTimeMillis())
 
+    /** Attente réelle (encore vivante) et refus définitifs, tenus séparés à l'écran. */
+    private data class OutboxState(val pending: Int, val failed: Int, val lastFailure: String?)
+
+    private val outboxFlow = combine(
+        container.database.outboxDao().observeCount(),
+        container.database.outboxDao().observeDeadCount(),
+        container.database.outboxDao().observeLastFailure(),
+    ) { pending, failed, reason -> OutboxState(pending, failed, reason) }
+
     private val base = combine(
-        container.feed.observeFeed(),
-        combine(loading, refreshing) { l, r -> l to r },
+        combine(container.feed.observeFeed(), combine(loading, refreshing) { l, r -> l to r }) { posts, lr ->
+            posts to lr
+        },
         combine(composer, error) { c, e -> c to e },
-        combine(container.networkMonitor.status(), container.database.outboxDao().observeCount()) { n, p -> n to p },
+        combine(container.networkMonitor.status(), outboxFlow) { n, o -> n to o },
         container.database.profileDao().observeMe(),
-    ) { posts, loadingPair, composerPair, networkPair, profile ->
+    ) { feedPair, composerPair, networkPair, profile ->
         Base(
-            posts = posts,
-            loading = loadingPair.first,
-            refreshing = loadingPair.second,
+            posts = feedPair.first,
+            loading = feedPair.second.first,
+            refreshing = feedPair.second.second,
             composerText = composerPair.first.text,
             posting = composerPair.first.posting,
             composerMediaLabel = composerPair.first.mediaLabel,
             error = composerPair.second,
             network = networkPair.first,
-            pendingOperations = networkPair.second,
+            pendingOperations = networkPair.second.pending,
+            failedOperations = networkPair.second.failed,
+            lastFailure = networkPair.second.lastFailure,
             hasProfile = profile?.handle?.isNotBlank() == true,
             myId = profile?.id,
         )
@@ -138,6 +154,8 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             error = b.error,
             network = b.network,
             pendingOperations = b.pendingOperations,
+            failedOperations = b.failedOperations,
+            lastFailure = b.lastFailure,
             hasProfile = b.hasProfile,
             myId = b.myId,
             storyDraft = draft,
@@ -402,5 +420,23 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
 
     fun dismissError() {
         error.value = null
+    }
+
+    /**
+     * Remet en file les opérations que le serveur avait refusées, puis les renvoie tout de suite.
+     * Sans cette action, un refus définitif restait invisible et définitif.
+     */
+    fun retryFailedOperations() {
+        viewModelScope.launch {
+            val revived = runCatching { container.sync.retryFailed() }.getOrDefault(0)
+            if (revived > 0) error.value = null
+        }
+    }
+
+    /** Abandonne les opérations refusées, sur décision explicite de l'utilisateur. */
+    fun discardFailedOperations() {
+        viewModelScope.launch {
+            runCatching { container.sync.discardFailed() }
+        }
     }
 }

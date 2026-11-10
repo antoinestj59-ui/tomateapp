@@ -19,7 +19,7 @@ import tomate.data.db.OutboxEntity
  *  - the loop is bounded per call so a huge backlog cannot hang the app.
  */
 class SyncEngine(
-    private val api: SupabaseApi,
+    private val api: OutboxRemote,
     private val outboxDao: OutboxDao,
     private val backoff: Backoff = Backoff(),
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -81,13 +81,43 @@ class SyncEngine(
         )
     }
 
+    /**
+     * Toutes les écritures sont volontairement insensibles au rejeu.
+     *
+     * Un rejeu se produisait pour de vrai : la requête atteignait le serveur, puis la réponse se
+     * perdait (réseau coupé, app tuée). La deuxième tentative tombait alors sur une violation
+     * d'unicité (23505) que l'app affichait en « conflit de données », et l'opération restait
+     * bloquée à vie. `ignore-duplicates` avec la clé d'idempotence de la table fait exactement
+     * ce qu'il faut : si la ligne est là, on ne fait rien.
+     */
+    /** Nombre d'opérations encore en attente d'un envoi réussi. */
+    suspend fun pendingCount(): Int = outboxDao.count()
+
+    /**
+     * Remet en file les opérations refusées, puis retente immédiatement. Retourne le nombre
+     * d'opérations remises en jeu.
+     */
+    suspend fun retryFailed(): Int {
+        val revived = outboxDao.reviveDead()
+        if (revived > 0) drain()
+        return revived
+    }
+
+    /** Abandonne les opérations refusées : elles ne repartiront plus. Retourne le nombre effacé. */
+    suspend fun discardFailed(): Int = outboxDao.discardDead()
+
     private suspend fun dispatch(entry: OutboxEntity): Outcome<Unit> = when (entry.kind) {
-        // Client-generated ids make every write idempotent: replaying an operation that already
-        // reached the server must not surface a false "already exists" conflict to the user.
-        "post_insert" -> api.insert("posts", entry.payload, upsert = true, onConflict = "id").toUnit()
+        "post_insert" -> api.insert(
+            "posts", entry.payload, ignoreDuplicates = true, onConflict = "id",
+        ).toUnit()
         "post_delete" -> api.delete("posts", listOf("id" to "eq.${idFromPayload(entry.payload)}")).toUnit()
-        "comment_insert" -> api.insert("post_comments", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "reaction_add" -> api.insert("post_reactions", entry.payload, ignoreDuplicates = true).toUnit()
+        "comment_insert" -> api.insert(
+            "post_comments", entry.payload, ignoreDuplicates = true, onConflict = "id",
+        ).toUnit()
+        "reaction_add" -> api.insert(
+            "post_reactions", entry.payload, ignoreDuplicates = true,
+            onConflict = "post_id,user_id,kind",
+        ).toUnit()
         "reaction_remove" -> api.delete(
             "post_reactions",
             listOf(
@@ -97,7 +127,10 @@ class SyncEngine(
         ).toUnit()
         // Une participation d'événement est une réaction de kind `participe` : la suppression
         // filtre sur ce kind pour ne pas effacer aussi la réaction « tomate » du même compte.
-        "participation_add" -> api.insert("post_reactions", entry.payload, ignoreDuplicates = true).toUnit()
+        "participation_add" -> api.insert(
+            "post_reactions", entry.payload, ignoreDuplicates = true,
+            onConflict = "post_id,user_id,kind",
+        ).toUnit()
         "participation_remove" -> api.delete(
             "post_reactions",
             listOf(
@@ -107,11 +140,21 @@ class SyncEngine(
             ),
         ).toUnit()
         "profile_upsert" -> api.insert("profiles", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "community_create" -> api.insert("communities", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "community_join" -> api.insert("community_members", entry.payload, upsert = true).toUnit()
+        "community_create" -> api.insert(
+            "communities", entry.payload, ignoreDuplicates = true, onConflict = "id",
+        ).toUnit()
+        // La clé primaire est (community_id, user_id) : ignorer le doublon est le seul comportement
+        // possible, car un ON CONFLICT DO UPDATE exigerait une politique UPDATE que le membre
+        // n'a pas sur sa propre ligne.
+        "community_join" -> api.insert(
+            "community_members", entry.payload, ignoreDuplicates = true,
+            onConflict = "community_id,user_id",
+        ).toUnit()
         "conversation_create" -> api.insert(
             "conversations",
             entry.payload,
+            ignoreDuplicates = true,
+            onConflict = "id",
             representation = false,
         ).toUnit()
         "conversation_member_add" -> api.insert(
@@ -122,7 +165,10 @@ class SyncEngine(
             representation = false,
         ).toUnit()
         "conversation_member_add_handle" -> addMemberByHandle(entry.payload)
-        "story_insert" -> api.insert("stories", entry.payload, representation = false).toUnit()
+        "story_insert" -> api.insert(
+            "stories", entry.payload, ignoreDuplicates = true, onConflict = "id",
+            representation = false,
+        ).toUnit()
         "story_view" -> api.insert(
             "story_views",
             entry.payload,
@@ -131,9 +177,16 @@ class SyncEngine(
             representation = false,
         ).toUnit()
         "story_delete" -> api.delete("stories", listOf("id" to "eq.${idFromPayload(entry.payload)}")).toUnit()
-        "message_send" -> api.insert("messages", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "report_create" -> api.insert("reports", entry.payload, upsert = true, onConflict = "id").toUnit()
-        "block_create" -> api.insert("blocks", entry.payload, upsert = true).toUnit()
+        "message_send" -> api.insert(
+            "messages", entry.payload, ignoreDuplicates = true, onConflict = "id",
+        ).toUnit()
+        "report_create" -> api.insert(
+            "reports", entry.payload, ignoreDuplicates = true, onConflict = "id",
+        ).toUnit()
+        "block_create" -> api.insert(
+            "blocks", entry.payload, ignoreDuplicates = true,
+            onConflict = "blocker_id,blocked_id",
+        ).toUnit()
         else -> Outcome.Failure(
             AppError.Validation(
                 technicalMessage = "unknown_outbox_kind:${entry.kind}",

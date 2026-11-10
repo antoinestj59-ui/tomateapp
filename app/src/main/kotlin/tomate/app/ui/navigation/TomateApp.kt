@@ -77,7 +77,7 @@ fun TomateApp(
                                 }
                             },
                             icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { Text(destination.label) },
+                            label = { NavigationTabLabel(destination.label) },
                         )
                     }
                 }

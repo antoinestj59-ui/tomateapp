@@ -69,7 +69,20 @@ sealed class AppError {
     data class Conflict(
         override val technicalMessage: String = "Conflit de données",
     ) : AppError() {
-        override val userMessage: String = "Cette action entre en conflit avec des données existantes."
+        override val userMessage: String =
+            "Cette action existe déjà sur le serveur : elle a été ignorée, rien n'a été dupliqué."
+    }
+
+    /**
+     * Refus explicite du serveur (politique RLS, 403). Ce n'est pas une session expirée : le
+     * jeton est valide, mais cette écriture n'est pas autorisée pour ce compte.
+     */
+    data class Forbidden(
+        override val technicalMessage: String = "Action non autorisée",
+    ) : AppError() {
+        override val userMessage: String =
+            "Le serveur a refusé cette action : votre compte n'a pas les droits nécessaires."
+        override val isRetryable: Boolean get() = true
     }
 
     data class Validation(

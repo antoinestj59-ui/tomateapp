@@ -405,3 +405,69 @@ Publication `49deae70-1bbe-4310-a0bb-ed374c99658c` (« Apéro TOMATE ») :
   (surveillance démarrée à l'ouverture du fil), pas une notification d'appel système.
 - L'APK pèse 69 Mo parce qu'il embarque les quatre ABI ; un découpage par ABI n'a pas été fait.
 - Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009`.
+
+## 2 undecies. Itération 0.3.1 — file d'attente bloquée, erreurs collantes, libellés coupés (10 novembre 2026)
+
+### Symptômes constatés sur l'appareil (captures du propriétaire)
+
+1. Accueil : bandeau rouge « Cette action entre en conflit avec des données existantes. » qui ne
+   part jamais, plus « 20 opération(s) en attente de synchronisation. » qui ne descend jamais à 0.
+2. Communauté « Les SLP » : bouton « Rejoindre » toujours affiché, même bandeau rouge, et
+   « Les publications sont réservées aux membres actifs » — l'adhésion ne se fait pas.
+3. Mise en page : le bouton « Événement » se cassait en « Év / én » et l'onglet « Communautés » en
+   « Communau / tés ».
+
+### Causes trouvées dans le code (pas des suppositions)
+
+| Cause | Où | Effet |
+|---|---|---|
+| Le compteur lisait **toutes** les lignes de la file, y compris celles **définitivement refusées** (épuisement des 8 tentatives) | `OutboxDao.observeCount()` | le nombre ne pouvait plus redescendre : 20 pour toujours |
+| Un refus définitif restait **invisible et sans action** : aucune trace, aucun moyen de réessayer ou d'abandonner | `SyncEngine` | l'utilisateur ne pouvait rien corriger |
+| Plusieurs rejeux n'étaient **pas idempotents** : `story_insert`, `conversation_create`, `community_create`, `report_create`, `message_send`, `comment_insert`, `post_insert` faisaient un simple insert ; `community_join`/`block_create` faisaient un merge sans cible | `SyncEngine.dispatch` | une requête arrivée au serveur mais dont la réponse se perdait produisait un doublon (23505) → « conflit de données », puis blocage |
+| Un **403** (refus de politique RLS) était traduit en « session expirée » | `SupabaseApi.mapStatusToException` | rafraîchissement de jeton inutile, vraie cause masquée, retours en boucle |
+| Les bandeaux d'erreur n'avaient **aucune croix** et l'erreur n'était pas remise à zéro avant une nouvelle action | `TomateInlineNotice`, `HomeViewModel`, `CommunityDetailViewModel` | une erreur d'il y a dix minutes restait affichée par-dessus l'écran courant |
+| Boutons dans une `Row` avec `Spacer(weight)` ; libellé d'onglet au style par défaut | `HomeScreen`, `TomateApp` | « Év / én », « Communau / tés » |
+
+### Corrections
+
+- `OutboxDao` : le compteur « en attente » ne compte que les opérations **vivantes** ; nouvelles
+  requêtes `observeDeadCount`, `observeLastFailure`, `dead()`, `reviveDead()`, `discardDead()`.
+- `SyncEngine` : rejeu idempotent de **toutes** les écritures (`ignore-duplicates` avec la clé
+  d'unicité réelle de la table : `id`, `post_id,user_id,kind`, `community_id,user_id`,
+  `blocker_id,blocked_id`) ; `retryFailed()` et `discardFailed()`.
+- `OutboxRemote` (nouvelle interface) implémentée par `SupabaseApi` : la stratégie de rejeu est
+  désormais **testable** en JVM, ce qui n'était pas le cas avant.
+- `AppError.Forbidden` : un 403 n'est plus une session expirée, et le message le dit.
+- Message de conflit reformulé : « Cette action existe déjà sur le serveur : elle a été ignorée,
+  rien n'a été dupliqué. »
+- Accueil : bandeau d'erreur avec croix ; nouveau bandeau « N opération(s) refusée(s) par le
+  serveur » avec la dernière raison et deux actions, **Réessayer** / **Abandonner**.
+- Communauté : erreur remise à zéro au début de chaque action, croix sur le bandeau, message
+  adapté à l'état réel (`Pending`, `Rejected`, `Banned`), vidage de la file après une adhésion.
+- `ComposerActions` et `NavigationTabLabel` extraits pour être rendus et testés : `FlowRow` pour
+  Photo / Vidéo / Événement ; onglets sur une ligne en 9 sp.
+
+### Vérifications réellement exécutées
+
+| Test | Résultat |
+|---|---|
+| `SyncEngineTest` (nouveau, 8 tests JVM) | **8/8** : rejeu d'une story → `stories` + `ignore-duplicates` + `id` ; rejeu d'une adhésion → `community_members` + `community_id,user_id`, jamais de merge ; rejeu d'une réaction → clé réelle ; refus définitif → **hors du compteur mais conservé** ; panne passagère → replanifiée ; `retryFailed()` renvoie l'opération ; `discardFailed()` l'efface ; kind inconnu refusé |
+| Suites complètes `:data`, `:net`, `:app` | **54 tests, 0 échec, 0 ignoré** (dont 2 tests de rendu) |
+| `UiScreenshotTest` (nouveau, Robolectric + Compose, 360 dp) | rendu réel en pixels ; assertions : « Communautés » et « Messages » ont la même hauteur (donc pas de retour à la ligne), « Événement » et « Photo » aussi |
+| Captures produites puis **regardées** | `artifacts/ui-check/navigation.png` (« Communautés » entier, une ligne) et `artifacts/ui-check/composer.png` (« Photo », « Vidéo », « Événement » entiers) |
+| Requêtes réelles sur le vrai serveur (compte `verifmedia`) | adhésion à « Les SLP » **201**, publication dans la communauté **201**, réaction `tomate` **201** — les lignes de test ont ensuite été **supprimées** (204) et l'état du serveur remis à 2 membres |
+| `:app:assembleDebug` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.3.1-debug.apk` (`versionCode 13`) |
+
+### Limites de cette itération
+
+- **Toujours aucun appareil ni émulateur** (`/dev/kvm` inaccessible, pas de `sudo`) : les
+  corrections sont compilées et testées en JVM, les deux zones réécrites sont **rendues en image**
+  et regardées, mais l'app complète n'a pas été exécutée sur un téléphone.
+- Le **conflit exact** qui a rempli la file de l'appareil n'a pas pu être lu : la base Room de
+  l'appareil est inaccessible d'ici. Ce qui est corrigé, c'est la classe entière de causes
+  (rejeu non idempotent, refus définitif compté, erreur collante) — pas une ligne précise
+  identifiée sur le téléphone.
+- Les 20 opérations déjà présentes sur l'appareil apparaîtront après mise à jour comme
+  « opération(s) refusée(s) » avec leur raison : **Réessayer** les rejoue maintenant sans doublon,
+  **Abandonner** les efface. Si elles échouent encore, la raison exacte sera affichée à l'écran.
+- Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009` (pas de clé `service_role`).

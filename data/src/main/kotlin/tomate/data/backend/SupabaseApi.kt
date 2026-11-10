@@ -37,7 +37,7 @@ class SupabaseApi(
     private val baseUrl: String,
     private val apiKey: String,
     private val http: HttpClient,
-) {
+) : tomate.data.sync.OutboxRemote {
     /**
      * Supplies the current access token. `forceRefresh = true` is used after a 401: the manager
      * refreshes the session once and the request is replayed.
@@ -96,10 +96,10 @@ class SupabaseApi(
 
     // ------------------------------------------------------------ PostgREST
 
-    suspend fun select(
+    override suspend fun select(
         table: String,
-        query: List<Pair<String, String>> = emptyList(),
-        single: Boolean = false,
+        query: List<Pair<String, String>>,
+        single: Boolean,
     ): Outcome<String> = authorized { token ->
         val response = http.get(endpoint("/rest/v1/$table")) {
             header("apikey", apiKey)
@@ -111,13 +111,13 @@ class SupabaseApi(
         readOrThrow(response)
     }
 
-    suspend fun insert(
+    override suspend fun insert(
         table: String,
         body: String,
-        upsert: Boolean = false,
-        onConflict: String? = null,
-        representation: Boolean = true,
-        ignoreDuplicates: Boolean = false,
+        upsert: Boolean,
+        onConflict: String?,
+        representation: Boolean,
+        ignoreDuplicates: Boolean,
     ): Outcome<String> = authorized { token ->
         val response = http.post(endpoint("/rest/v1/$table")) {
             header("apikey", apiKey)
@@ -156,7 +156,7 @@ class SupabaseApi(
         readOrThrow(response)
     }
 
-    suspend fun delete(table: String, filter: List<Pair<String, String>>): Outcome<String> =
+    override suspend fun delete(table: String, filter: List<Pair<String, String>>): Outcome<String> =
         authorized { token ->
             val response = http.delete(endpoint("/rest/v1/$table")) {
                 header("apikey", apiKey)
@@ -226,9 +226,12 @@ class SupabaseApi(
         }
     }
 
-    private fun mapStatusToException(status: HttpStatusCode, text: String): Throwable = when {
-        status == HttpStatusCode.Unauthorized || status == HttpStatusCode.Forbidden ->
-            SessionExpiredException(text)
+    internal fun mapStatusToException(status: HttpStatusCode, text: String): Throwable = when {
+        status == HttpStatusCode.Unauthorized -> SessionExpiredException(text)
+        // 403 = refus de politique RLS ou de droit. Ce n'est pas un jeton expiré : rafraîchir la
+        // session ne changerait rien et masquait la vraie cause derrière « session expirée ».
+        status == HttpStatusCode.Forbidden || text.contains("42501") ->
+            RequestFailedException(AppError.Forbidden(text))
         status == HttpStatusCode.TooManyRequests -> RequestFailedException(AppError.RateLimited(text))
         status == HttpStatusCode.NotFound -> {
             if (text.contains("PGRST205") || text.contains("42P01") || text.contains("schema cache")) {
@@ -237,6 +240,7 @@ class SupabaseApi(
                 RequestFailedException(AppError.NotFound(text))
             }
         }
+        // 23505 = doublon : l'opération est déjà appliquée côté serveur, ce n'est pas une panne.
         status == HttpStatusCode.Conflict || text.contains("23505") ->
             RequestFailedException(AppError.Conflict(text))
         status == HttpStatusCode.BadRequest || text.contains("\"code\":\"22") ->

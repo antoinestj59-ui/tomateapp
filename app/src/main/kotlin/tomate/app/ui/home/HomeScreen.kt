@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -84,7 +86,7 @@ import tomate.core.model.NetworkStatus
 import tomate.core.model.Story
 import tomate.data.repo.StoryRepository
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(
     network: NetworkStatus,
@@ -161,8 +163,35 @@ fun HomeScreen(
             TomateInlineNotice(
                 text = state.error!!.userMessage,
                 tone = NoticeTone.Error,
+                onDismiss = viewModel::dismissError,
                 modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.s),
             )
+        }
+        // Une opération refusée n'est ni « en attente » ni réessayée toute seule : on le dit
+        // clairement et on laisse l'utilisateur décider quoi en faire.
+        if (state.failedOperations > 0) {
+            Column(
+                modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.s),
+            ) {
+                TomateInlineNotice(
+                    text = buildString {
+                        append("${state.failedOperations} opération(s) refusée(s) par le serveur.")
+                        state.lastFailure?.let { reason ->
+                            append(" Dernière raison : ")
+                            append(reason.take(160))
+                        }
+                    },
+                    tone = NoticeTone.Error,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = viewModel::retryFailedOperations) { Text("Réessayer") }
+                    TextButton(onClick = viewModel::discardFailedOperations) { Text("Abandonner") }
+                }
+            }
         }
         if (state.network == NetworkStatus.Offline) {
             TomateInlineNotice(
@@ -221,38 +250,15 @@ fun HomeScreen(
                     )
                 }
                 Spacer(Modifier.height(TomateSpacing.s))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MetricPill(text = "${state.composerText.length}/2000")
-                    Spacer(Modifier.width(TomateSpacing.xs))
-                    TomateTonalButton(
-                        text = "Photo",
-                        onClick = { postPicker.launch("image/*") },
-                        enabled = !state.posting,
-                    )
-                    Spacer(Modifier.width(TomateSpacing.xs))
-                    TomateTonalButton(
-                        text = "Vidéo",
-                        onClick = { postPicker.launch("video/*") },
-                        enabled = !state.posting,
-                    )
-                    Spacer(Modifier.width(TomateSpacing.xs))
-                    TomateTonalButton(
-                        text = "Événement",
-                        onClick = viewModel::openEventComposer,
-                        enabled = !state.posting,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    IconButton(
-                        onClick = viewModel::publish,
-                        enabled = (state.composerText.isNotBlank() || state.composerMediaLabel != null) && !state.posting,
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Publier")
-                    }
-                }
+                ComposerActions(
+                    length = state.composerText.length,
+                    canPublish = state.composerText.isNotBlank() || state.composerMediaLabel != null,
+                    posting = state.posting,
+                    onPhoto = { postPicker.launch("image/*") },
+                    onVideo = { postPicker.launch("video/*") },
+                    onEvent = viewModel::openEventComposer,
+                    onPublish = viewModel::publish,
+                )
             }
         }
 

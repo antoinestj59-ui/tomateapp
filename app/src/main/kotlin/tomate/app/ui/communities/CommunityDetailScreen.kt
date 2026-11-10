@@ -120,7 +120,13 @@ fun CommunityDetailScreen(
             }
 
             if (state.error != null) {
-                item { TomateInlineNotice(text = state.error!!.userMessage, tone = NoticeTone.Error) }
+                item {
+                    TomateInlineNotice(
+                        text = state.error!!.userMessage,
+                        tone = NoticeTone.Error,
+                        onDismiss = viewModel::dismissError,
+                    )
+                }
             }
 
             if (state.canPost) {
@@ -150,7 +156,16 @@ fun CommunityDetailScreen(
             } else {
                 item {
                     TomateInlineNotice(
-                        text = "Les publications sont réservées aux membres actifs. Rejoignez la communauté pour participer.",
+                        text = when (state.community?.myMembership) {
+                            MembershipStatus.Pending ->
+                                "Votre demande d'adhésion est en attente de validation par un responsable."
+                            MembershipStatus.Rejected ->
+                                "Votre demande d'adhésion a été refusée."
+                            MembershipStatus.Banned ->
+                                "Vous ne pouvez plus participer à cette communauté."
+                            else ->
+                                "Les publications sont réservées aux membres actifs. Rejoignez la communauté pour participer."
+                        },
                         tone = NoticeTone.Info,
                     )
                 }
