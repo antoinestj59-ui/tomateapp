@@ -137,3 +137,26 @@ Rien de cette liste n'est présenté comme fait dans l'application.
 | Notifications push Android (FCM) | **code + build**, envoi non testé | `0007`, projet Firebase, fonction Edge déployée | `assembleDebug` OK, guide `docs/10` |
 | Web Push (navigateur fermé) | **non implémenté** | clés VAPID + envoi | — |
 | Notifications push Android | **non testées** sur appareil | téléphone + Firebase | — |
+
+## Mise à jour 0.4.0 (10 novembre 2026)
+
+Refonte expressive de l'interface et fonctions de messagerie/fil. Chaque ligne indique la
+preuve réellement obtenue dans ce dépôt, ou l'absence de preuve.
+
+| Fonction | État | Dépendance | Preuve |
+|---|---|---|---|
+| Barre de navigation expressive (pilule active, bouton central, badge de non-lus) | **rendue en image puis regardée** | aucune | `app/build/ui-screenshots/navigation.png`, test `bottom_navigation_labels_stay_on_one_line` |
+| Rangée de stories (tuile « + » rose, avatars cerclés, nom affiché) | **rendue en image puis regardée** | aucune | `ui-screenshots/stories.png`, test `stories_strip_renders_add_tile_and_rings` |
+| Carte de publication (média plein cadre, temps humain, icône de portée, Partager, menu Modifier/Supprimer) | **rendue en image** ; partage système et suppression **non exécutés** (aucun appareil) | `posts_delete_author` (déjà) | `ui-screenshots/post-card.png` ; `PATCH/DELETE posts` vérifiés en HTTP réel |
+| Écran Messages (filtres Toutes / Privées / Groupes / Non lues, composeur) | **compilé**, filtres **non vus sur appareil** | aucune | filtre local sur `isGroup` et `unreadCount` |
+| Écran Communautés (bandeau, Vos communautés, Découvrir) | **compilé** | aucune | sections calculées depuis `myMembership` |
+| Onglet Membres d'une communauté | **requêtes réelles validées** | `0002` | `community_members` + `profiles?id=in.(…)` → 200 avec 2 membres réels |
+| Centre de notifications (Android) | **chemin serveur vérifié de bout en bout** | `0007` **appliquée** | message A→B ⇒ notification `message` créée par le déclencheur, lue par B (200), `PATCH read_at` 204 puis relue |
+| Badge de notifications non lues sur l'accueil | **code livré**, compte réel | `0007` | `NotificationRepository.load()` ; aucun badge si l'appel échoue |
+| Réactions aux messages | **vérifiées en HTTP réel** (ajout 201, doublon 409, retrait 204, non-membre 403) | `0010` **appliquée** | `tooling/verify_040_reactions.sh` → 26/26 |
+| Réponse citée, renommage de groupe, édition de publication | **vérifiées en HTTP réel** | aucune | même script (26/26) |
+| Partager une publication depuis la PWA | **code livré** (`navigator.share`, repli presse-papiers) | navigateur | `node --check` OK, action `share-post` couverte par le répartiteur |
+| Recherche dans le fil (Android) | **filtre local** sur les publications déjà chargées | aucune | champ dédié dans l'en-tête |
+| Tab bar de la PWA alignée sur les maquettes (onglet central « + ») | **non fait** : la PWA garde 5 onglets et un bouton de publication | — | — |
+| Avatar photo, badge « vérifié », compteurs d'abonnés | **non faits** : aucune donnée d'abonnement n'existe côté client | table `follows` + écran | — |
+| E2EE réel, appels de groupe, modération administrateur | **non faits** | — | — |

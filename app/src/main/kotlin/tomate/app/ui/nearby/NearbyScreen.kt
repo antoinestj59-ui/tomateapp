@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Send
@@ -54,6 +55,7 @@ fun NearbyScreen(
     network: NetworkStatus,
     relayEnabled: Boolean,
     batterySaver: Boolean,
+    onBack: (() -> Unit)? = null,
     viewModel: NearbyViewModel = viewModel(
         factory = tomateViewModelFactory { container ->
             NearbyViewModel(TomateApplication.instance, container)
@@ -71,6 +73,13 @@ fun NearbyScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Proximité") },
+            navigationIcon = {
+                if (onBack != null) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
+                    }
+                }
+            },
             actions = { TomateNetworkBadge(status = network) },
         )
 

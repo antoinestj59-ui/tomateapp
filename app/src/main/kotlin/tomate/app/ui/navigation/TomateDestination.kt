@@ -33,6 +33,7 @@ object TomateRoutes {
     const val CHAT = "chat/{conversationId}"
     const val COMMUNITY_DETAIL = "community/{communityId}"
     const val SETTINGS = "settings"
+    const val NOTIFICATIONS = "notifications"
 
     fun postDetail(postId: String) = "post/$postId"
     fun chat(conversationId: String) = "chat/$conversationId"

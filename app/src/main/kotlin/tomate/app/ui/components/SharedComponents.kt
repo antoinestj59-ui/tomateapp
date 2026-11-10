@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,15 +16,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.ModeComment
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +65,9 @@ import java.util.Locale
 import tomate.core.designsystem.components.MetricPill
 import tomate.core.designsystem.components.TomateAvatar
 import tomate.core.designsystem.components.TomateLogo
+import tomate.core.designsystem.components.clockTime
+import tomate.core.designsystem.components.compactCount
+import tomate.core.designsystem.components.humanTime
 import tomate.core.designsystem.theme.TomateSpacing
 import tomate.core.designsystem.theme.TomateTheme
 import tomate.core.model.Conversation
@@ -102,9 +117,17 @@ fun TomateRemoteImage(
 fun Long.formatTimestamp(): String =
     if (this <= 0L) "—" else timeFormat.format(Date(this))
 
+/** Icône de portée d'une publication : globe, personnes ou cadenas (jamais un texte brut). */
+private fun visibilityIcon(visibility: Visibility) = when (visibility) {
+    Visibility.Public -> Icons.Filled.Public
+    Visibility.Followers -> Icons.Filled.People
+    Visibility.Community -> Icons.Filled.Groups
+    Visibility.Private -> Icons.Filled.Lock
+}
+
 /**
- * Carte de publication expressive : surface tonale, hiérarchie resserrée, logo en repli.
- * Plus d'accumulation de cartes génériques : une seule surface par publication.
+ * Carte de publication expressive, proche des maquettes : identité en haut, média plein cadre,
+ * rangée d'actions (réagir, commenter, partager, menu) alignée sur une seule ligne.
  */
 @Composable
 fun PostCard(
@@ -116,20 +139,33 @@ fun PostCard(
     eventGoingByMe: Boolean = false,
     onParticipate: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
+    var menuOpen by remember { mutableStateOf(false) }
     Surface(
-        onClick = onOpen,
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
     ) {
-        Column(modifier = Modifier.padding(TomateSpacing.l)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpen)
+                    .padding(
+                        start = TomateSpacing.m,
+                        end = TomateSpacing.s,
+                        top = TomateSpacing.m,
+                        bottom = TomateSpacing.s,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (post.authorHandle.isBlank()) {
                     TomateLogo(size = 44.dp)
                 } else {
-                    TomateAvatar(label = post.authorDisplayName.ifBlank { post.authorHandle })
+                    TomateAvatar(label = post.authorDisplayName.ifBlank { post.authorHandle }, size = 46)
                 }
                 Spacer(Modifier.width(TomateSpacing.m))
                 Column(modifier = Modifier.weight(1f)) {
@@ -140,19 +176,74 @@ fun PostCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = "@${post.authorHandle.ifBlank { "…" }} · ${post.createdAt.formatTimestamp()}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = humanTime(post.createdAt),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.width(TomateSpacing.xs))
+                        Text(
+                            text = "·",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(TomateSpacing.xs))
+                        Icon(
+                            imageVector = visibilityIcon(post.visibility),
+                            contentDescription = post.visibility.label,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        if (post.pendingSync) {
+                            Spacer(Modifier.width(TomateSpacing.xs))
+                            Icon(
+                                imageVector = Icons.Filled.Schedule,
+                                contentDescription = null,
+                                tint = TomateTheme.status.warning,
+                                modifier = Modifier.size(13.dp),
+                            )
+                        }
+                    }
                 }
-                if (post.visibility != Visibility.Public) {
-                    MetricPill(text = post.visibility.label)
+                if (onEdit != null || onDelete != null) {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "Options de la publication",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            if (onEdit != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Modifier") },
+                                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                    onClick = {
+                                        menuOpen = false
+                                        onEdit()
+                                    },
+                                )
+                            }
+                            if (onDelete != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Supprimer") },
+                                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                    onClick = {
+                                        menuOpen = false
+                                        onDelete()
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
             val event = EventCodec.decodeEvent(post.body)
             if (event != null) {
-                Spacer(Modifier.height(TomateSpacing.m))
+                Spacer(Modifier.height(TomateSpacing.s))
                 EventBlock(
                     event = event,
                     going = eventGoing,
@@ -160,16 +251,23 @@ fun PostCard(
                     onToggle = onParticipate,
                 )
             } else if (post.body.isNotBlank()) {
-                Spacer(Modifier.height(TomateSpacing.m))
-                Text(text = post.body, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = post.body,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(
+                        // Aligné sur le nom de l'auteur, comme dans les maquettes.
+                        start = 70.dp,
+                        end = TomateSpacing.m,
+                        bottom = TomateSpacing.s,
+                    ).clickable(onClick = onOpen),
+                )
             }
 
             postMediaPublicUrl(post.mediaPath)?.let { url ->
-                Spacer(Modifier.height(TomateSpacing.m))
                 if (post.mediaType == "video") {
-                    val context = LocalContext.current
                     Row(
                         modifier = Modifier
+                            .padding(horizontal = TomateSpacing.s)
                             .fillMaxWidth()
                             .clip(MaterialTheme.shapes.large)
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -186,71 +284,96 @@ fun PostCard(
                         Text(text = "Vidéo — ouvrir le lecteur", style = MaterialTheme.typography.bodyMedium)
                     }
                 } else {
+                    // Média plein cadre : c'est ce qui donne sa présence à la carte dans la maquette.
                     TomateRemoteImage(
                         url = url,
                         contentDescription = "Photo de ${post.authorDisplayName.ifBlank { post.authorHandle }}",
                         modifier = Modifier
+                            .padding(horizontal = TomateSpacing.s)
                             .fillMaxWidth()
-                            .height(220.dp)
-                            .clip(MaterialTheme.shapes.large),
+                            .height(260.dp)
+                            .clip(MaterialTheme.shapes.large)
+                            .clickable(onClick = onOpen),
                     )
                 }
             }
 
-            Spacer(Modifier.height(TomateSpacing.s))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (post.pendingSync) {
-                    Icon(
-                        imageVector = Icons.Filled.Schedule,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = TomateTheme.status.warning,
-                    )
-                    Spacer(Modifier.width(TomateSpacing.xs))
-                    Text(
-                        text = "En attente d'envoi",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TomateTheme.status.warning,
-                    )
-                    Spacer(Modifier.width(TomateSpacing.m))
-                }
-                IconButton(onClick = onReact, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        imageVector = if (post.reactedByMe) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = if (post.reactedByMe) "Retirer la réaction" else "Réagir",
-                        tint = if (post.reactedByMe) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
+            if (post.pendingSync) {
                 Text(
-                    text = post.reactionCount.toString(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "En attente d'envoi",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TomateTheme.status.warning,
+                    modifier = Modifier.padding(start = TomateSpacing.m, top = TomateSpacing.xs),
                 )
-                Spacer(Modifier.width(TomateSpacing.l))
-                Icon(
-                    imageVector = Icons.Filled.ModeComment,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+
+            Row(
+                modifier = Modifier.padding(horizontal = TomateSpacing.s, vertical = TomateSpacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ActionPill(
+                    icon = if (post.reactedByMe) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    label = compactCount(post.reactionCount),
+                    contentDescription = if (post.reactedByMe) "Retirer la réaction" else "Réagir",
+                    tint = if (post.reactedByMe) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    onClick = onReact,
                 )
-                Spacer(Modifier.width(TomateSpacing.xs))
-                Text(
-                    text = post.commentCount.toString(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ActionPill(
+                    icon = Icons.Filled.ModeComment,
+                    label = compactCount(post.commentCount),
+                    contentDescription = "Commentaires",
+                    onClick = onOpen,
+                )
+                ActionPill(
+                    icon = Icons.Filled.Share,
+                    label = "Partager",
+                    contentDescription = "Partager",
+                    onClick = {
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, post.body.ifBlank { "Publication TOMATE" })
+                        }
+                        runCatching {
+                            context.startActivity(Intent.createChooser(share, "Partager la publication"))
+                        }
+                    },
                 )
                 Spacer(Modifier.weight(1f))
-                if (onEdit != null) {
-                    AssistChip(
-                        onClick = onEdit,
-                        label = { Text("Modifier") },
-                        colors = AssistChipDefaults.assistChipColors(),
-                    )
-                }
             }
         }
+    }
+}
+
+/** Action compacte icône + libellé, comme dans la rangée d'actions des maquettes. */
+@Composable
+private fun ActionPill(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = TomateSpacing.s, vertical = TomateSpacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(19.dp),
+        )
+        Spacer(Modifier.width(TomateSpacing.xs))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = tint,
+            maxLines = 1,
+        )
     }
 }
 
@@ -260,52 +383,65 @@ fun ConversationRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 1.dp,
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.m),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(TomateSpacing.l),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TomateAvatar(label = conversation.title)
-            Spacer(Modifier.width(TomateSpacing.m))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (conversation.streak > 0) {
-                        "${conversation.title} · 🔥 ${conversation.streak}"
-                    } else {
-                        conversation.title
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = conversation.lastMessagePreview.ifBlank { "Aucun message" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = conversation.lastMessageAt.formatTimestamp(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (conversation.unreadCount > 0) {
-                    Spacer(Modifier.height(TomateSpacing.xs))
-                    MetricPill(text = conversation.unreadCount.toString())
+        TomateAvatar(label = conversation.title, size = 52)
+        Spacer(Modifier.width(TomateSpacing.m))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = conversation.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (conversation.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = conversation.lastMessagePreview.ifBlank { "Aucun message" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(TomateSpacing.s))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = if (conversation.streak > 0) {
+                    "${clockTime(conversation.lastMessageAt)} · 🔥${conversation.streak}"
+                } else {
+                    clockTime(conversation.lastMessageAt)
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = if (conversation.unreadCount > 0) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            if (conversation.unreadCount > 0) {
+                Spacer(Modifier.height(TomateSpacing.xs))
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = CircleShape,
+                ) {
+                    Text(
+                        text = compactCount(conversation.unreadCount),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
+                    )
                 }
-                if (conversation.pendingCount > 0) {
-                    Spacer(Modifier.height(TomateSpacing.xs))
-                    MetricPill(text = "${conversation.pendingCount} en attente")
-                }
+            } else if (conversation.pendingCount > 0) {
+                Spacer(Modifier.height(TomateSpacing.xs))
+                Text(
+                    text = "${conversation.pendingCount} en attente",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TomateTheme.status.warning,
+                )
             }
         }
     }

@@ -553,3 +553,50 @@ Deux constats honnêtes, reproduits chacun 3 fois minimum :
    suppression de conversation de l'app croit réussir (204) sans rien effacer — **en attente
    d'application de `0007`/`0008`/`0009`, toujours dues depuis 0.3.1.** Dès `0008` appliquée,
    relancer `./tooling/verify_040_reactions.sh` (attendu : 26/26).
+
+## 3. Itération 0.4.0-visuel — interface alignée sur les maquettes (10 novembre 2026)
+
+Migrations `0007` → `0010` appliquées par le propriétaire : le script de rejeu réel
+`tooling/verify_040_reactions.sh` passe **26 PASS / 0 FAIL** (réponses citées, renommage,
+réactions + RLS non-membre, édition de publication, suppression de conversation avec cascade).
+Le chemin de notifications a été vérifié séparément : message A→B ⇒ notification `message`
+créée par le déclencheur serveur, lue par B (200), `PATCH read_at` (204), relue.
+
+### Ce qui a été refait pour ressembler aux maquettes
+
+| Zone | Avant | Maintenant |
+|---|---|---|
+| Barre de navigation | `NavigationBar` Material standard, 5 onglets | barre expressive maison : 4 onglets, pilule colorée sous l'onglet actif, **bouton central « + »** qui ouvre une feuille d'actions réelles (story, conversation, communauté, proximité), badge rouge de messages non lus |
+| Accueil — en-tête | logo + badge réseau + actualiser | logo + **TOMATE** en gras, **recherche locale** dans le fil, **cloche avec compteur réel** de notifications, **avatar** vers le profil, badge réseau conservé |
+| Accueil — stories | pastilles rondes, libellé = pseudo | tuile rose arrondie « + », avatars cerclés (gris = vue), libellé = nom affiché, deux lignes maximum |
+| Accueil — publication | carte tonale, date `dd/MM HH:mm`, portée en pastille texte, « Modifier » en chip | carte blanche, **« il y a 12 min »**, **icône de portée** (globe/personnes/cadenas), média **plein cadre**, rangée ❤️/💬/Partager (partage système réel), menu ⋯ **Modifier / Supprimer** |
+| Messages | barre simple, cartes empilées, date complète | titre + composeur rouge, **filtres Toutes / Privées / Groupes / Non lues**, lignes plates avatar+nom+aperçu+heure+badge rouge, FAB |
+| Communautés | liste de cartes | **bandeau dégradé TOMATE**, « Vos communautés », « Découvrir » en carrousel, pastilles d'icônes |
+| Profil | cartes empilées (chiffrement, récupération, blocages) | en-tête centré (anneau, crayon), nom + @pseudo + bio, bouton **Modifier le profil** + partage, **statistiques réelles** (publications, communautés, bloqués), menu à chevrons (Paramètres, Notifications, Confidentialité, Code de récupération, Chiffrement), **Se déconnecter** en pilule rouge. Toutes les fonctions précédentes restent accessibles (récupération, blocages, E2EE, identifiant, file d'attente) |
+| Détail communauté | barre de titre + carte | **bannière**, logo superposé, adhésion, **onglets Publications / Membres / À propos**, membres lus sur le serveur |
+| Notifications | inexistant | **écran réel** lisant `notifications` (0007), marquage lu / tout lu, navigation vers la conversation ou la publication |
+| PWA | pas de partage | action **Partager** (Web Share, repli presse-papiers) ; temps relatifs et médias arrondis déjà en place |
+
+### Ce qui est vérifié, et comment
+
+| Vérification | Résultat |
+|---|---|
+| `:core` `:data` `:net` `:app` tests JVM | **BUILD SUCCESSFUL**, 0 échec |
+| `UiScreenshotTest` (4 rendus Robolectric 360 dp) | navigation, stories, carte de publication, composeur : **PNG produits puis regardés** (`app/build/ui-screenshots/`) |
+| `:app:assembleDebug --rerun-tasks` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.4.0-debug.apk` |
+| `node --check web/js/app.js web/js/queue.js` | OK ; **aucune action `data-act` sans gestionnaire** (audit automatique) |
+| Rejeu HTTP réel (`verify_040_reactions.sh`) | **26/26** |
+| Notifications A→B en HTTP réel | notification créée par le serveur, lue, marquée lue |
+
+### Limites (inchangées ou nouvelles, déclarées telles quelles)
+
+- **Toujours aucun appareil ni émulateur** : les écrans sont compilés et quatre zones sont
+  rendues en pixels et regardées, mais l'app complète n'a pas été parcourue à la main.
+- La **PWA garde 5 onglets** (dont « Réseau ») sans bouton central : la refonte de sa barre
+  n'a pas été faite, seules les actions de partage et les temps relatifs sont alignés.
+- **Pas d'avatars photo, pas de badge « vérifié », pas de compteurs d'abonnés** : aucune de ces
+  données n'existe côté client (aucune table `follows` interrogée). Les afficher serait inventer.
+- Le bouton central ouvre les actions existantes ; il ne crée pas de « publication rapide »
+  modale : la rédaction reste dans l'accueil.
+- Toujours non faits : E2EE réel, relais A→B→C sur trois téléphones, modération administrateur,
+  assistant, appels de groupe.

@@ -355,6 +355,7 @@ const ICON = {
   heart: svg('<path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8Z"/>'),
   comment: svg('<path d="M21 11.5A7.5 7.5 0 0 1 13.5 19H8l-5 3v-7.5A7.5 7.5 0 0 1 10.5 7h3A7.5 7.5 0 0 1 21 11.5Z"/>'),
   send: svg('<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/>'),
+  share: svg('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6 15.4 6.4M8.6 13.4l6.8 4.2"/>'),
   trash: svg('<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/>'),
   refresh: svg('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>'),
   settings: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>'),
@@ -612,6 +613,9 @@ function postItem(post) {
         ${event ? '' : `<button class="action ${post.reacted_by_me ? 'liked' : ''}" data-act="like" data-id="${esc(post.id)}" aria-pressed="${!!post.reacted_by_me}">${ICON.heart}<span>${post.reaction_count ?? 0}</span></button>`}
         <button class="action" data-act="open-post" data-id="${esc(post.id)}">
           ${ICON.comment}<span>${post.comment_count ?? 0}</span>
+        </button>
+        <button class="action" data-act="share-post" data-id="${esc(post.id)}" aria-label="Partager">
+          ${ICON.share ?? ICON.send}<span>Partager</span>
         </button>
         ${mine ? `<button class="action" data-act="edit-post" data-id="${esc(post.id)}" aria-label="Modifier">✏️</button><button class="action" data-act="delete-post" data-id="${esc(post.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
       </div>
@@ -3176,6 +3180,19 @@ document.addEventListener('click', async (event) => {
       case 'open-post':
         location.hash = `#/post/${trigger.dataset.id}`;
         break;
+      case 'share-post': {
+        const shared = S.feed.find((p) => p.id === trigger.dataset.id);
+        if (shared) {
+          const text = (shared.body || 'Publication TOMATE').slice(0, 280);
+          if (navigator.share) {
+            await navigator.share({ title: 'TOMATE', text }).catch(() => {});
+          } else {
+            await navigator.clipboard?.writeText(text).catch(() => {});
+            toast('Publication copiée.');
+          }
+        }
+        break;
+      }
       case 'open-chat':
         location.hash = `#/chat/${trigger.dataset.id}`;
         break;

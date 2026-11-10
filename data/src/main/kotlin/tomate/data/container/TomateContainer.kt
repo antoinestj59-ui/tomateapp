@@ -16,6 +16,7 @@ import tomate.data.repo.CommunityRepository
 import tomate.data.repo.FeedRepository
 import tomate.data.repo.MessagingRepository
 import tomate.data.repo.ModerationRepository
+import tomate.data.repo.NotificationRepository
 import tomate.data.repo.ProfileRepository
 import tomate.data.repo.PushRepository
 import tomate.data.repo.StoryRepository
@@ -89,6 +90,7 @@ class TomateContainer(
             e2ee = e2ee,
         )
     }
+    val notifications: NotificationRepository by lazy { NotificationRepository(api) }
     val moderation: ModerationRepository by lazy {
         ModerationRepository(api, database.blockDao(), database.outboxDao(), session)
     }
