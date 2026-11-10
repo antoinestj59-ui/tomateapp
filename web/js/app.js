@@ -26,6 +26,15 @@ import {
 } from './db.js';
 import { enqueue, flushQueue, pendingCount } from './queue.js';
 import {
+  decryptMessage,
+  encryptMessage,
+  ensureIdentity,
+  isEncrypted,
+  loadPeerKeys,
+  pairingLink,
+  savePeerKeys,
+} from './e2ee.js';
+import {
   cachedWeather,
   describeCode,
   fetchWeather,
@@ -1499,6 +1508,20 @@ function chatMediaPreview() {
   </div>`;
 }
 
+/**
+ * Texte affichable d'un message : le clair si on l'a, sinon un avertissement honnête — jamais du
+ * base64 présenté comme un message.
+ */
+function messageTextHtml(message) {
+  if (message.plain) return `<div style="white-space:pre-wrap">${esc(message.plain)}</div>`;
+  if (isEncrypted(message.body)) {
+    return message.undecryptable
+      ? '<div class="tiny" style="opacity:.85">🔒 Message chiffré — la clé de ce contact manque sur cet appareil.</div>'
+      : '<div class="tiny" style="opacity:.85">🔒 Déchiffrement…</div>';
+  }
+  return message.body ? `<div style="white-space:pre-wrap">${esc(message.body)}</div>` : '';
+}
+
 function messageItem(message) {
   const poll = decodePoll(message.body);
   if (poll) return pollBubble(message, poll);
@@ -1509,8 +1532,8 @@ function messageItem(message) {
   return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:18px">
     ${quoted ? `<div class="quote">${esc(quoted)}</div>` : ''}
     ${messageMediaHtml(message)}
-    ${message.body ? `<div style="white-space:pre-wrap">${esc(message.body)}</div>` : ''}
-    <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
+    ${messageTextHtml(message)}
+    <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${isEncrypted(message.body) ? ' · 🔒 chiffré' : ' · non chiffré'}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
     <div class="msg-tools"><button class="link" data-act="msg-reply" data-id="${esc(message.id)}">Répondre</button><span class="react-quick">${['🍅', '❤️', '👍'].map((e) => `<button class="link" data-act="msg-react" data-id="${esc(message.id)}" data-emoji="${e}">${e}</button>`).join('')}</span></div>
     ${chips ? `<div class="chips">${chips}</div>` : ''}
   </div>`;
@@ -1561,6 +1584,8 @@ async function loadMessages(conversationId) {
   const key = `messages:${conversationId}`;
   const cached = await cacheGet(key);
   S.messages = Array.isArray(cached) ? cached : [];
+  // Le cache ne contient que du chiffré : on redéchiffre avec les clés locales, même hors ligne.
+  await decryptMessages(conversationId, S.messages);
   if (!ONLINE()) return;
   try {
     await ensureRemoteSession();
@@ -1570,7 +1595,8 @@ async function loadMessages(conversationId) {
     // Keep local-only messages, including refused ones: the user's text must not vanish silently.
     const local = S.messages.filter((m) => m.pending || m.failed);
     S.messages = [...rows, ...local.filter((m) => !rows.some((r) => r.id === m.id))];
-    await cacheSet(key, S.messages);
+    await decryptMessages(conversationId, S.messages);
+    await cacheSet(key, cacheableMessages(S.messages));
     await resolveChatMedia(S.messages);
     await loadMessageReactions(conversationId);
   } catch {
@@ -1596,6 +1622,31 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     }
   }
 
+  // Chiffrement 1-1 avant toute écriture : le cache, la file et le serveur ne voient que du
+  // chiffré. En groupe, ou sans clé du contact, le message part en clair et l'interface l'affiche.
+  const conversation = S.conversations.find((c) => c.id === conversationId);
+  const peerId = conversation?.peer_id ?? null;
+  let wireBody = text;
+  let sealed = false;
+  if (text && peerId && !conversation?.is_group) {
+    const peer = loadPeerKeys(peerId) || (await fetchPeerKeys(peerId));
+    if (peer) {
+      try {
+        const identity = await ensureIdentity(S.profile.id);
+        wireBody = await encryptMessage({
+          plaintext: text,
+          conversationId,
+          senderId: S.profile.id,
+          recipientAgreeKey: peer.agreeKey,
+          senderSignPrivate: identity.signPrivate,
+        });
+        sealed = true;
+      } catch (error) {
+        toast('Message trop long pour être chiffré : il part en clair.');
+      }
+    }
+  }
+
   const replyTo = S.replyTo || null;
   const message = {
     id: crypto.randomUUID(),
@@ -1603,7 +1654,9 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     conversation_id: conversationId,
     reply_to_id: replyTo,
     sender_id: S.profile.id,
-    body: text,
+    body: wireBody,
+    plain: text,
+    encrypted: sealed,
     media_path: attachment?.path ?? null,
     media_kind: attachment?.kind ?? null,
     media_mime: attachment?.mime ?? null,
@@ -1612,15 +1665,15 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     pending: true,
   };
   S.messages = [...S.messages, message];
-  await cacheSet(`messages:${conversationId}`, S.messages);
+  await cacheSet(`messages:${conversationId}`, cacheableMessages(S.messages));
   // Only server columns go on the wire: local state (`pending`) is not a database column.
   await enqueue('message_send', {
     id: message.id,
     client_id: message.client_id,
     conversation_id: conversationId,
     sender_id: message.sender_id,
-    body: text,
-    encrypted: false,
+    body: wireBody,
+    encrypted: sealed,
     ...(replyTo ? { reply_to_id: replyTo } : {}),
     ...(attachment
       ? {
@@ -1685,19 +1738,29 @@ async function newConversation() {
 const FRIEND_SCHEME = 'tomato://add';
 
 function friendPayload() {
+  // Le QR transporte l'identité ET les clés publiques de chiffrement : c'est ce qui permet de
+  // vérifier les clés hors bande au lieu de faire confiance au serveur.
+  const identity = S.e2eeIdentity;
   const params = new URLSearchParams({
+    v: '1',
     u: S.profile.id,
+    n: S.profile.handle ?? '',
     h: S.profile.handle ?? '',
-    n: S.profile.display_name ?? '',
   });
-  return `${FRIEND_SCHEME}?${params.toString()}`;
+  if (identity) {
+    params.set('a', identity.agreeKey);
+    params.set('s', identity.signKey);
+  }
+  return `tomate://pair?${params.toString()}`;
 }
 
 /** Accepts a tomato:// payload, a pasted link, or an https URL carrying the same query. */
 function parseFriendPayload(raw) {
   const text = String(raw ?? '').trim();
   if (!text) return null;
-  const normalised = text.replace(/^tomato:\/\//i, 'https://tomate.local/');
+  const normalised = text
+    .replace(/^tomato:\/\//i, 'https://tomate.local/')
+    .replace(/^tomate:\/\//i, 'https://tomate.local/');
   let url;
   try {
     url = new URL(normalised);
@@ -1708,15 +1771,71 @@ function parseFriendPayload(raw) {
   if (!id || !/^[A-Za-z0-9-]{3,64}$/.test(id)) return null;
   return {
     id,
-    handle: (url.searchParams.get('h') ?? '').replace(/^@/, '').slice(0, 20),
+    handle: (url.searchParams.get('n') ?? url.searchParams.get('h') ?? '').replace(/^@/, '').slice(0, 20),
     name: (url.searchParams.get('n') ?? '').slice(0, 40),
+    agreeKey: url.searchParams.get('a') ?? null,
+    signKey: url.searchParams.get('s') ?? null,
   };
+}
+
+/** Clés publiques d'un contact lues dans l'annuaire (migration 0011), si l'appairage manque. */
+async function fetchPeerKeys(userId) {
+  if (!userId || !ONLINE()) return null;
+  try {
+    await ensureRemoteSession();
+    const rows = await rest('profiles', {
+      query: `select=id,handle,e2ee_agree_key,e2ee_sign_key&id=eq.${userId}`,
+    });
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row?.e2ee_agree_key || !row?.e2ee_sign_key) return null;
+    savePeerKeys(userId, row.handle, row.e2ee_agree_key, row.e2ee_sign_key, 'directory');
+    return loadPeerKeys(userId);
+  } catch {
+    return null;
+  }
+}
+
+/** Déchiffre ce qui doit l'être, sans jamais afficher de base64 à l'utilisateur. */
+async function decryptMessages(conversationId, list) {
+  if (!S.profile) return;
+  const identity = await ensureIdentity(S.profile.id).catch(() => null);
+  if (!identity) return;
+  for (const message of list) {
+    if (!isEncrypted(message.body) || message.plain) continue;
+    try {
+      const senderKeys = message.sender_id === S.profile.id
+        ? { agreeKey: identity.agreeKey, signKey: identity.signKey }
+        : (loadPeerKeys(message.sender_id) || (await fetchPeerKeys(message.sender_id)));
+      if (!senderKeys?.signKey) {
+        message.undecryptable = true;
+        continue;
+      }
+      message.plain = await decryptMessage({
+        body: message.body,
+        conversationId,
+        expectedSenderId: message.sender_id,
+        recipientAgreePrivate: identity.agreePrivate,
+        senderSignPublic: senderKeys.signKey,
+      });
+      message.encrypted = true;
+    } catch {
+      message.undecryptable = true;
+    }
+  }
+}
+
+/** Le cache local ne garde que le corps chiffré : le texte clair reste en mémoire. */
+function cacheableMessages(list) {
+  return list.map(({ plain, ...rest }) => rest);
 }
 
 async function addFriendFromText(raw) {
   const peer = parseFriendPayload(raw);
   if (!peer) return toast('Ce code ne contient pas une invitation TOMATE.');
   if (peer.id === S.profile.id) return toast("C'est votre propre code.");
+  if (peer.agreeKey && peer.signKey) {
+    savePeerKeys(peer.id, peer.handle, peer.agreeKey, peer.signKey, 'pairing');
+  }
   await createConversationWith(peer);
   toast(`Conversation avec @${peer.handle || peer.name || 'ce compte'} prête.`);
 }
@@ -1814,6 +1933,9 @@ async function scanFriendCode(dialog) {
 }
 
 async function createConversationWith(peer) {
+  if (peer.agreeKey && peer.signKey) {
+    savePeerKeys(peer.id, peer.handle, peer.agreeKey, peer.signKey, 'pairing');
+  }
   const existing = S.conversations.find((c) => c.peer_id === peer.id);
   if (existing) {
     location.hash = `#/chat/${existing.id}`;
@@ -3524,6 +3646,13 @@ async function boot() {
     if (!S.profile) S.route = 'welcome';
     await navigate();
     if (navigator.onLine) await syncNow({ silent: true });
+    if (S.profile) {
+      try {
+        S.e2eeIdentity = await ensureIdentity(S.profile.id);
+      } catch (error) {
+        S.lastError = humanError(error);
+      }
+    }
     if (S.profile) await loadNotifications();
   }
 }

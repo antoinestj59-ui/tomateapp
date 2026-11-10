@@ -4,7 +4,9 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transform
 import kotlinx.serialization.builtins.ListSerializer
+import tomate.core.crypto.E2ee
 import tomate.core.model.AppError
 import tomate.core.model.ContactCandidate
 import tomate.core.model.Conversation
@@ -30,6 +32,7 @@ import tomate.data.db.ProfileDao
 import tomate.data.db.StreakDayRow
 import tomate.data.e2ee.E2eeEngine
 import tomate.data.e2ee.E2eeStatus
+import tomate.data.e2ee.PeerKeySource
 import tomate.data.mapper.toDomain
 import tomate.data.mapper.toEntity
 
@@ -41,8 +44,8 @@ import tomate.data.mapper.toEntity
  * lost connection never loses a message. Deduplication uses `client_id` (unique locally) and the
  * server primary key, and ordering uses `created_at` + client id as a stable tie-breaker.
  *
- * E2EE STATUS: [e2ee] is [E2eeNotConfigured] in this version; messages are therefore stored and
- * transmitted with transport security only, and the UI labels them "non chiffré de bout en bout".
+ * E2EE : les conversations 1-1 sont chiffrées avant d'être écrites en base, donc Room, l'outbox et
+ * Supabase ne voient que du texte chiffré. Les groupes restent en clair et l'interface l'affiche.
  */
 class MessagingRepository(
     private val api: SupabaseApi,
@@ -83,7 +86,51 @@ class MessagingRepository(
     }
 
     fun observeMessages(conversationId: String): Flow<List<Message>> =
-        messageDao.observeForConversation(conversationId).map { rows -> rows.map { it.toDomain() } }
+        messageDao.observeForConversation(conversationId).transform { rows ->
+            emit(rows.map { row -> decryptForDisplay(conversationId, row) })
+        }
+
+    /**
+     * Cache mémoire des déchiffrements : un message déjà ouvert ne refait pas un accord ECDH à
+     * chaque émission de la base. La clé est l'identifiant du message, la valeur son texte clair.
+     */
+    private val decryptedCache = object : LinkedHashMap<String, String>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 500
+    }
+
+    private suspend fun decryptForDisplay(conversationId: String, row: MessageEntity): Message {
+        val domain = row.toDomain()
+        if (!E2ee.isEncrypted(row.body)) return domain
+        synchronized(decryptedCache) { decryptedCache[row.id] }?.let { cached ->
+            return domain.copy(body = cached, encrypted = true)
+        }
+        return when (val cipher = e2ee.openIncoming(conversationId, row.senderId, row.body)) {
+            is E2eeEngine.Cipher.Ok -> {
+                if (cipher.encrypted) synchronized(decryptedCache) { decryptedCache[row.id] = cipher.text }
+                domain.copy(body = cipher.text, encrypted = true)
+            }
+            is E2eeEngine.Cipher.Failed -> domain.copy(body = "", encrypted = true, ciphertextUnreadable = true)
+        }
+    }
+
+    /** L'autre participant d'une conversation 1-1, `null` pour un groupe ou un membre manquant. */
+    suspend fun peerIdOf(conversationId: String): String? {
+        val conversation = conversationDao.byId(conversationId) ?: return null
+        if (conversation.isGroup) return null
+        val me = session.currentUserId
+        val others = conversationDao.members(conversationId).map { it.memberId }.filter { it != me }
+        return others.singleOrNull()
+    }
+
+    suspend fun peerSource(conversationId: String): PeerKeySource? {
+        val peer = peerIdOf(conversationId) ?: return null
+        return (e2ee as? tomate.data.e2ee.E2eeService)?.peerSource(peer)
+    }
+
+    suspend fun safetyNumber(conversationId: String): String? {
+        val peer = peerIdOf(conversationId) ?: return null
+        return (e2ee as? tomate.data.e2ee.E2eeService)?.safetyNumber(peer)
+    }
 
     fun observeConversation(id: String): Flow<Conversation?> =
         conversationDao.observeById(id).map { it?.toDomain() }
@@ -299,6 +346,15 @@ class MessagingRepository(
         val me = session.ensureActor().getOrNull()?.userId
             ?: return Outcome.Failure(AppError.Unauthorized())
 
+        // Chiffrement avant toute écriture : Room, l'outbox et Supabase ne voient que du chiffré.
+        val peer = peerIdOf(conversationId)
+        val cipher = e2ee.prepareOutgoing(conversationId, me, peer, trimmed)
+        if (cipher is E2eeEngine.Cipher.Failed) {
+            return Outcome.Failure(AppError.Validation("e2ee_failed", cipher.reason))
+        }
+        val outgoing = cipher as E2eeEngine.Cipher.Ok
+        val encrypted = outgoing.encrypted
+
         val now = clock()
         val messageId = UUID.randomUUID().toString()
         val clientId = UUID.randomUUID().toString()
@@ -307,17 +363,22 @@ class MessagingRepository(
             clientId = clientId,
             conversationId = conversationId,
             senderId = me,
-            body = trimmed,
+            body = outgoing.text,
             createdAt = now,
             deliveryState = MessageDeliveryState.Pending,
             transport = null,
-            encrypted = e2ee.status == E2eeStatus.Operational,
+            encrypted = encrypted,
             replyToId = replyToId,
             attemptCount = 0,
             lastError = null,
         )
         messageDao.insert(entity)
-        if (updatePreview) updateConversationSummary(conversationId, preview ?: trimmed, now)
+        if (updatePreview) {
+            // L'aperçu de la liste des conversations ne doit jamais contenir le texte clair d'un
+            // message chiffré : il est aussi stocké en base et répliqué.
+            val safePreview = if (encrypted) preview ?: "🔒 Message chiffré" else preview ?: trimmed
+            updateConversationSummary(conversationId, safePreview, now)
+        }
 
         val payload = SupabaseApi.json.encodeToString(
             MessageInsert.serializer(),
@@ -326,8 +387,8 @@ class MessagingRepository(
                 clientId = clientId,
                 conversationId = conversationId,
                 senderId = me,
-                body = trimmed,
-                encrypted = entity.encrypted,
+                body = outgoing.text,
+                encrypted = encrypted,
                 replyToId = replyToId,
             ),
         )
@@ -336,13 +397,19 @@ class MessagingRepository(
             // nearby transport. Nothing is claimed as delivered.
             enqueue("message_send", clientId, payload)
             updatePendingCount(conversationId)
-            return Outcome.Success(entity.toDomain())
+            return Outcome.Success(entity.copy(body = trimmed).toDomain())
         }
         return when (val remote = api.insert("messages", payload, upsert = true, onConflict = "id")) {
             is Outcome.Success -> {
                 messageDao.updateDelivery(messageId, MessageDeliveryState.Delivered.name, TransportKind.Internet.name, null)
                 updatePendingCount(conversationId)
-                Outcome.Success(entity.copy(deliveryState = MessageDeliveryState.Delivered, transport = TransportKind.Internet).toDomain())
+                Outcome.Success(
+                    entity.copy(
+                        body = trimmed,
+                        deliveryState = MessageDeliveryState.Delivered,
+                        transport = TransportKind.Internet,
+                    ).toDomain(),
+                )
             }
             is Outcome.Failure -> {
                 messageDao.recordAttempt(messageId, remote.error.technicalMessage)

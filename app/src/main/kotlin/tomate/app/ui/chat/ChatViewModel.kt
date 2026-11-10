@@ -10,12 +10,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import tomate.core.model.AppError
 import tomate.core.model.Conversation
 import tomate.core.model.Message
 import tomate.core.model.Outcome
 import tomate.data.container.TomateContainer
-import tomate.data.e2ee.badgeLabel
+import tomate.data.e2ee.PeerKeySource
 import tomate.data.extras.ConversationExtras
 import tomate.data.extras.PollCodec
 import tomate.data.extras.PollTally
@@ -57,6 +58,19 @@ class ChatViewModel(
         val QUICK_EMOJIS = listOf("🍅", "❤️", "👍", "😂", "😮", "🙏")
     }
 
+    /** État réel du chiffrement de CETTE conversation, avec vérification des clés. */
+    data class SecurityUi(
+        val label: String = "Vérification du chiffrement…",
+        val safetyNumber: String? = null,
+        val peerKnown: Boolean = false,
+        val peerVerified: Boolean = false,
+        val isGroup: Boolean = false,
+        val open: Boolean = false,
+        val input: String = "",
+        val message: String? = null,
+        val myLink: String? = null,
+    )
+
     private val conversationId = conversationId
     private val text = MutableStateFlow("")
     private val sending = MutableStateFlow(false)
@@ -72,6 +86,7 @@ class ChatViewModel(
     private val reactions = MutableStateFlow<Map<String, Map<String, Int>>>(emptyMap())
     private val renameDialogOpen = MutableStateFlow(false)
     private val renameText = MutableStateFlow("")
+    val security = MutableStateFlow(SecurityUi())
 
     /** Set once the conversation is left or deleted: the screen closes itself. */
     val closed = MutableStateFlow(false)
@@ -144,7 +159,6 @@ class ChatViewModel(
                 null
             },
             myId = myId,
-            e2eeLabel = container.e2ee.status.badgeLabel(),
             canDelete = mayDelete,
             closing = isClosing,
             replyToId = replyId,
@@ -158,9 +172,84 @@ class ChatViewModel(
 
     init {
         refresh()
+        refreshSecurity()
         viewModelScope.launch {
             canDelete.value = container.messaging.isConversationCreator(conversationId)
         }
+    }
+
+    /**
+     * Calcule l'état affiché : groupe non chiffré, contact sans clé, clé d'annuaire (à vérifier)
+     * ou clé épinglée par appairage (vérifiée). Le libellé suit toujours la réalité.
+     */
+    fun refreshSecurity() {
+        viewModelScope.launch {
+            val myId = container.session.currentUserId
+            val myLink = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val handle = container.database.profileDao().me()?.handle
+                    if (myId != null && handle != null) container.e2ee.myPairingLink(myId, handle) else null
+                }.getOrNull()
+            }
+            val peer = container.messaging.peerIdOf(conversationId)
+            if (peer == null) {
+                security.value = security.value.copy(
+                    label = "Groupe : non chiffré de bout en bout",
+                    safetyNumber = null,
+                    peerKnown = false,
+                    peerVerified = false,
+                    isGroup = true,
+                    myLink = myLink,
+                )
+                return@launch
+            }
+            val keys = withContext(kotlinx.coroutines.Dispatchers.IO) { container.e2ee.peerKeys(peer) }
+            val source = container.e2ee.peerSource(peer)
+            val number = withContext(kotlinx.coroutines.Dispatchers.IO) { container.e2ee.safetyNumber(peer) }
+            security.value = security.value.copy(
+                label = when {
+                    keys == null -> "Chiffrement en attente : appairez ce contact"
+                    source == PeerKeySource.Pairing -> "Chiffré de bout en bout · clé vérifiée par appairage"
+                    else -> "Chiffré de bout en bout · clé de l'annuaire, à vérifier"
+                },
+                safetyNumber = number,
+                peerKnown = keys != null,
+                peerVerified = source == PeerKeySource.Pairing,
+                isGroup = false,
+                myLink = myLink,
+            )
+            // Publier nos clés une fois qu'elles existent : sans cela, l'autre côté ne pourrait pas
+            // nous répondre chiffré tant qu'il ne nous a pas appairés.
+            if (myLink != null) runCatching { container.e2ee.publishIdentityKeys() }
+        }
+    }
+
+    fun openSecurity() {
+        security.value = security.value.copy(open = true)
+        refreshSecurity()
+    }
+
+    fun closeSecurity() {
+        security.value = security.value.copy(open = false, message = null)
+    }
+
+    fun onPairingInputChange(value: String) {
+        security.value = security.value.copy(input = value.take(512), message = null)
+    }
+
+    /** Appaire un contact à partir d'un lien collé (ou lu par un scanner / une étiquette NFC). */
+    fun pairFromInput() {
+        val payload = container.e2ee.parsePairingLink(security.value.input)
+        if (payload == null) {
+            security.value = security.value.copy(message = "Lien d'appairage invalide ou incomplet.")
+            return
+        }
+        container.e2ee.registerPeer(payload)
+        security.value = security.value.copy(
+            input = "",
+            message = "Contact appairé. Comparez le numéro de sécurité à voix haute.",
+        )
+        refreshSecurity()
     }
 
     fun refresh() {

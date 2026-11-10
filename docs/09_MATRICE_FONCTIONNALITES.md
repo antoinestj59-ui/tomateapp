@@ -160,3 +160,22 @@ preuve réellement obtenue dans ce dépôt, ou l'absence de preuve.
 | Tab bar de la PWA alignée sur les maquettes (onglet central « + ») | **non fait** : la PWA garde 5 onglets et un bouton de publication | — | — |
 | Avatar photo, badge « vérifié », compteurs d'abonnés | **non faits** : aucune donnée d'abonnement n'existe côté client | table `follows` + écran | — |
 | E2EE réel, appels de groupe, modération administrateur | **non faits** | — | — |
+
+## Itération 0.5.0 — chiffrement de bout en bout, appairage, maillage
+
+| Fonction | État | Preuve | Non fait / limite |
+|---|---|---|---|
+| E2EE 1-1 (ECIES P-256 + AES-GCM + signature ECDSA) | livré | 10 tests `E2eeTest`, 1 interop Node, 12 contrôles HTTP (`verify_050_e2ee.sh`) | pas de Double Ratchet (pas de confidentialité persistante) |
+| Interopérabilité Android ↔ PWA | livré | `E2eeInteropTest` : la PWA déchiffre un message Kotlin et Kotlin relit sa réponse | — |
+| Identité par appareil (clés privées chiffrées par le Keystore) | livré | test « les clés privées ne sont pas écrites en clair » | pas de multi-appareil |
+| Annuaire de clés publiques (`profiles.e2ee_*`, migration 0011) | livré, **migration à appliquer** | `verify_050_e2ee.sh` (5 contrôles en attente de 0011) | — |
+| Appairage QR (ZXing) | livré | 4 tests Robolectric : QR réel, contraste, rejet des liens invalides | scan caméra non exécuté (aucun appareil) |
+| Appairage NFC (NDEF) | livré | aller-retour de l'enregistrement NDEF testé | écriture sur une étiquette non exécutée |
+| Appairage par lien | livré | `PairingLinkTest`, partage système dans l'app | — |
+| Numéro de sécurité | livré | identique Kotlin/Node, affiché dans la conversation | — |
+| Clé épinglée prioritaire sur l'annuaire | livré | test dédié (l'annuaire ne peut pas substituer) | — |
+| Maillage : TTL, déduplication, split horizon, délai aléatoire | livré (politique) | 9 tests `MeshRouterTest` | radio BLE/Wi-Fi jamais exécutée |
+| Maillage : courrier borné + tag rotatif quotidien | livré (politique) | 4 tests `CourierStoreTest` | non persistant sur disque |
+| Maillage : signature ECDSA vérifiée avant relais | livré (politique) | test signature altérée → rejet | — |
+| Affichage honnête du chiffrement | livré | chaque message : « 🔒 chiffré » / « non chiffré » ; message illisible dit comme tel | — |
+| Groupes chiffrés | **non** | — | aucune implémentation MLS retenue |

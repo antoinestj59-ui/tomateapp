@@ -1,7 +1,8 @@
-# STATUS — TOMATE 0.4.0
+# STATUS — TOMATE 0.5.0
 
-Dernière vérification : **10 novembre 2026** (bac à sable cloud, JDK Temurin 21.0.13, Gradle 9.9.0, AGP 9.5.1) et
-contrôle syntaxique Node pour la PWA.
+Dernière vérification : **10 novembre 2026** (bac à sable cloud, JDK Temurin 21.0.13, Gradle 9.9.0, AGP 9.5.1, Node 26.13.0).
+
+Itération en cours : **0.5.0 — chiffrement de bout en bout, appairage QR/NFC/lien, maillage inspiré de bitchat**.
 
 Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est déclaré comme tel.
 
@@ -600,3 +601,56 @@ créée par le déclencheur serveur, lue par B (200), `PATCH read_at` (204), rel
   modale : la rédaction reste dans l'accueil.
 - Toujours non faits : E2EE réel, relais A→B→C sur trois téléphones, modération administrateur,
   assistant, appels de groupe.
+
+## 9. Itération 0.5.0 — chiffrement de bout en bout, appairage, maillage
+
+Dernière vérification : **10 novembre 2026**.
+
+### Ce qui a été exécuté
+
+| Vérification | Résultat |
+|---|---|
+| `:core` `:data` `:net` `:app` — tests JVM `--rerun-tasks` | **BUILD SUCCESSFUL**, **108 tests, 0 échec, 0 ignoré** (core 19, data 50, net 31, app 8) |
+| `:app:assembleDebug --rerun-tasks` | **BUILD SUCCESSFUL** — `artifacts/tomate-0.5.0-debug.apk`, `versionCode 16`, 0.5.0 |
+| Interopérabilité Android ↔ PWA | **exécutée** : `E2eeInteropTest` lance Node sur le vrai `web/js/e2ee.js` — la PWA déchiffre un message Kotlin, vérifie sa signature, renvoie une réponse que Kotlin déchiffre ; numéros de sécurité identiques |
+| Vecteur RFC 5869 (HKDF) | **octet pour octet** |
+| Appairage QR | **QR réel en pixels** (640×640, modules noirs et blancs comptés) |
+| Appairage NFC | **aller-retour NDEF** : le lien relu contient les mêmes clés |
+| Rejeu HTTP réel (`verify_050_e2ee.sh`) | **9 PASS / 5 FAIL** — les 5 échecs sont tous dus à la **migration 0011 non appliquée** (colonnes de l'annuaire absentes) |
+| Dont : le serveur ne stocke que du chiffré | **vérifié en HTTP réel** : message chiffré `201`, relu par le destinataire **octet pour octet**, `encrypted = true` en base, texte clair **absent** de la base |
+| `node --check web/js/app.js web/js/e2ee.js` | OK |
+
+### Ce que l'itération change vraiment
+
+- **E2EE réel 1-1** : ECDH P-256 + HKDF-SHA256 + AES-256-GCM, clé éphémère par message, signature
+  ECDSA de l'émetteur, AAD liant conversation/émetteur/clé. Le corps stocké dans `messages.body`
+  est le chiffré : Room, l'outbox, le cache PWA et Supabase ne voient que du chiffré.
+- **Un seul format, deux clients** : `core/crypto/E2ee.kt` et `web/js/e2ee.js` produisent le même
+  message ; le test JVM fait tourner Node pour le prouver.
+- **Un seul lien d'appairage** (`tomate://pair`) : QR, NFC, partage système et collage passent tous
+  par le même code, et il transporte les **clés publiques** — pas seulement un pseudo. Une clé
+  appairée est épinglée : l'annuaire ne peut plus la remplacer.
+- **Numéro de sécurité** affiché dans la conversation, avec la provenance de la clé (appairage
+  vérifié / annuaire à vérifier).
+- **Maillage façon bitchat** : en-tête clair + contenu opaque, TTL 7 décrémenté, déduplication
+  LRU 1000 sur 5 minutes, split horizon, délai aléatoire, courrier borné à 200 entrées / 24 h avec
+  **tag de destinataire rotatif quotidien**, signature vérifiée avant relais, opt-out utilisateur.
+- **Simplifications assumées** : un seul protocole de chiffrement (pas de Noise en plus), un seul
+  format d'appairage (l'ancien `tomato://add` reste accepté), une seule implémentation crypto
+  partagée au lieu de deux, plus de libellé générique « chiffrement » : chaque message et chaque
+  conversation disent leur état réel.
+
+### Limites déclarées (inchangées ou nouvelles)
+
+- **Aucun appareil, aucun émulateur** : ni BLE, ni Wi-Fi Direct, ni NFC réel, ni scan caméra.
+  La politique réseau est testée en JVM, la radio ne l'est pas.
+- **Pas de Double Ratchet** : une clé d'identité volée déchiffre les anciens messages. Pas de
+  confidentialité persistante, et l'interface ne le prétend pas.
+- **Groupes non chiffrés** : aucun chiffrement de groupe (MLS) dans cette version.
+- **Un appareil = une clé** : changer d'appareil rend les anciens messages illisibles.
+- **Clés de la PWA dans `localStorage`** : lisibles par un script injecté dans la page. L'app
+  Android, elle, les garde chiffrées par le Keystore.
+- **Migration 0011 non appliquée** : l'annuaire de clés est écrit mais pas encore utilisable en
+  production (5 contrôles HTTP en attente). L'appairage QR/NFC/lien fonctionne sans elle.
+- Toujours non faits : relais A→B→C sur trois téléphones, modération administrateur, appels de
+  groupe, chiffrement de groupe.

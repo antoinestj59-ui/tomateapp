@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +18,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
+import tomate.app.pairing.PairingQr
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Search
@@ -109,6 +121,7 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val call by viewModel.call.collectAsStateWithLifecycle()
+    val security by viewModel.security.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
     var wantsVideo by remember { mutableStateOf(false) }
@@ -158,11 +171,23 @@ fun ChatScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = state.e2eeLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { viewModel.openSecurity() },
+                    ) {
+                        Icon(
+                            if (security.isGroup) Icons.Filled.Groups else Icons.Filled.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = security.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             },
             navigationIcon = {
@@ -321,6 +346,25 @@ fun ChatScreen(
         }
 
         if (state.pollDialogOpen) {
+            if (security.open) {
+                SecurityDialog(
+                    security = security,
+                    onDismiss = viewModel::closeSecurity,
+                    onInputChange = viewModel::onPairingInputChange,
+                    onPair = viewModel::pairFromInput,
+                    onShareLink = {
+                        security.myLink?.let { link ->
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_TEXT, link)
+                            }
+                            context.startActivity(
+                                android.content.Intent.createChooser(intent, "Partager mon lien d'appairage"),
+                            )
+                        }
+                    },
+                )
+            }
             PollCreationDialog(state = state, viewModel = viewModel)
         }
 
@@ -358,6 +402,94 @@ fun ChatScreen(
             onDismiss = viewModel::dismissCall,
         )
     }
+}
+
+@Composable
+private fun SecurityDialog(
+    security: ChatViewModel.SecurityUi,
+    onDismiss: () -> Unit,
+    onInputChange: (String) -> Unit,
+    onPair: () -> Unit,
+    onShareLink: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Chiffrement de la conversation") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (security.isGroup) Icons.Filled.Groups else Icons.Filled.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(security.label, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (security.safetyNumber != null) {
+                    Text(
+                        "Numéro de sécurité — comparez-le à voix haute avec votre contact :",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Text(
+                        security.safetyNumber,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        if (security.peerVerified) {
+                            "Cette clé a été reçue par appairage : elle ne peut pas être remplacée par le serveur."
+                        } else {
+                            "Cette clé vient de l'annuaire. Appairez le contact (lien, QR ou NFC) pour la vérifier."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (!security.isGroup) {
+                    Text(
+                        "Aucune clé pour ce contact : les messages partent en clair jusqu'à l'appairage.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!security.isGroup) {
+                    OutlinedTextField(
+                        value = security.input,
+                        onValueChange = onInputChange,
+                        label = { Text("Coller un lien d'appairage tomate://pair…") },
+                        singleLine = false,
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    TextButton(onClick = onPair) { Text("Appairer ce contact") }
+                }
+                if (security.message != null) {
+                    Text(security.message!!, style = MaterialTheme.typography.bodySmall)
+                }
+                security.myLink?.let { link ->
+                    Text(
+                        "Mon QR d'appairage — il contient mes clés publiques :",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    val qr = remember(link) { PairingQr.image(link, 480) }
+                    if (qr != null) {
+                        Image(
+                            bitmap = qr,
+                            contentDescription = "QR code d'appairage TOMATE",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth().height(200.dp),
+                        )
+                    }
+                }
+                TextButton(onClick = onShareLink, enabled = security.myLink != null) {
+                    Text("Partager mon lien d'appairage")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } },
+    )
 }
 
 @Composable

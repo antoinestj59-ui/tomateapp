@@ -502,7 +502,14 @@ fun MessageBubble(
                     }
                     Spacer(Modifier.height(TomateSpacing.xs))
                 }
-                Text(text = message.body, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = if (message.ciphertextUnreadable) {
+                        "🔒 Message chiffré — la clé de ce contact manque sur cet appareil."
+                    } else {
+                        message.body
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Spacer(Modifier.height(TomateSpacing.xs))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -511,13 +518,11 @@ fun MessageBubble(
                         color = content.copy(alpha = 0.75f),
                         modifier = Modifier.weight(1f),
                     )
-                    if (!message.encrypted) {
-                        Text(
-                            text = "· non chiffré E2EE",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = content.copy(alpha = 0.75f),
-                        )
-                    }
+                    Text(
+                        text = if (message.encrypted) "· 🔒 chiffré" else "· non chiffré",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = content.copy(alpha = 0.75f),
+                    )
                     if (onReply != null) {
                         IconButton(onClick = onReply, modifier = Modifier.size(28.dp)) {
                             Icon(
