@@ -135,6 +135,123 @@ export const CALL_ICE = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
 
+// Un STUN suffit quand les deux réseaux laissent passer une liaison directe. Il ne suffit jamais
+// quand les deux côtés sont derrière un NAT symétrique (4G, réseau d'entreprise) : sans serveur
+// TURN pour relayer le média, l'appel échoue. Ces réglages restent sur l'appareil et ne sont
+// envoyés à aucun serveur : un TURN public ou votre propre coturn fait l'affaire.
+const TURN_STORAGE = 'tomate.turn.v1';
+
+/** Réglages TURN enregistrés sur cet appareil, ou null. Une adresse non TURN est ignorée. */
+export function loadTurnSettings() {
+  try {
+    const raw = localStorage.getItem(TURN_STORAGE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const url = String(parsed?.url ?? '').trim();
+    if (!/^turns?:\S+$/.test(url)) return null;
+    return {
+      url,
+      username: String(parsed?.username ?? ''),
+      credential: String(parsed?.credential ?? ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveTurnSettings({ url, username, credential }) {
+  const cleanUrl = String(url ?? '').trim();
+  if (!/^turns?:\S+$/.test(cleanUrl)) {
+    return { ok: false, error: 'Adresse TURN invalide : elle doit commencer par turn: ou turns:.' };
+  }
+  const cleanUser = String(username ?? '').trim();
+  const cleanSecret = String(credential ?? '').trim();
+  if (cleanUser && !cleanSecret) {
+    return { ok: false, error: 'Un identifiant TURN sans mot de passe est refusé.' };
+  }
+  const settings = { url: cleanUrl, username: cleanUser, credential: cleanSecret };
+  localStorage.setItem(TURN_STORAGE, JSON.stringify(settings));
+  return { ok: true, settings };
+}
+
+export function clearTurnSettings() {
+  localStorage.removeItem(TURN_STORAGE);
+}
+
+/** Liste ICE réellement utilisée par les appels : STUN de base + TURN configuré s'il existe. */
+export function iceServers() {
+  const turn = loadTurnSettings();
+  if (!turn) return CALL_ICE.slice();
+  const entry = { urls: turn.url };
+  if (turn.username) {
+    entry.username = turn.username;
+    entry.credential = turn.credential;
+  }
+  return [...CALL_ICE, entry];
+}
+
+/**
+ * Diagnostic de collecte ICE, sans micro ni second appareil.
+ *
+ * Il répond à la seule question utile avant d'accuser l'application : quels types de candidats
+ * cet appareil obtient-il ? `srflx` prouve que le STUN répond, `relay` prouve que le TURN
+ * configuré fonctionne. Sans `relay`, un appel entre deux réseaux restrictifs ne peut pas aboutir.
+ */
+export function gatherIceReport({ timeoutMs = 8000, servers = iceServers() } = {}) {
+  return new Promise((resolve) => {
+    const types = { host: 0, srflx: 0, prflx: 0, relay: 0 };
+    const startedAt = Date.now();
+    const hasTurn = servers.some((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      return urls.some((url) => typeof url === 'string' && url.startsWith('turn'));
+    });
+    let pc = null;
+    let settled = false;
+    let timer = null;
+    const finish = (reason, error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const report = {
+        ok: types.relay > 0 || types.srflx > 0,
+        types,
+        ms: Date.now() - startedAt,
+        reason,
+        hasTurn,
+        error,
+      };
+      if (pc) {
+        try {
+          pc.close();
+        } catch {
+          // Un pair déjà fermé n'est pas une erreur.
+        }
+        pc = null;
+      }
+      resolve(report);
+    };
+    try {
+      pc = new RTCPeerConnection({ iceServers: servers });
+    } catch (error) {
+      finish('creation', error?.message ?? 'RTCPeerConnection indisponible');
+      return;
+    }
+    timer = setTimeout(() => finish('timeout'), timeoutMs);
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const type = event.candidate.type || 'host';
+        types[type] = (types[type] ?? 0) + 1;
+        return;
+      }
+      finish('complete');
+    };
+    pc.createDataChannel('tomate-diagnostic');
+    pc.createOffer()
+      .then((offer) => pc.setLocalDescription(offer))
+      .catch((error) => finish('offer', error?.message ?? String(error)));
+  });
+}
+
 // `messages.body` est limité à 4000 caractères (contrainte de la 0001) alors qu'un SDP pèse
 // facilement 3 à 6 Ko : la signalisation est donc découpée en morceaux numérotés, réassemblés
 // à la lecture. Chaque morceau reste un message ordinaire, donc soumis aux mêmes règles RLS.

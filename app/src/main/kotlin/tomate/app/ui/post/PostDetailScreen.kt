@@ -108,10 +108,14 @@ fun PostDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(TomateSpacing.m),
             ) {
                 item {
+                    val participation = state.participation
                     PostCard(
                         post = state.post!!,
                         onOpen = { },
                         onReact = viewModel::react,
+                        eventGoing = participation?.going,
+                        eventGoingByMe = participation?.mine ?: false,
+                        onParticipate = if (participation != null) viewModel::toggleParticipation else null,
                     )
                 }
                 if (state.reported) {

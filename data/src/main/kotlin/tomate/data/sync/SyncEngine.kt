@@ -95,6 +95,17 @@ class SyncEngine(
                 "user_id" to "eq.${fieldFromPayload(entry.payload, "user_id")}",
             ),
         ).toUnit()
+        // Une participation d'événement est une réaction de kind `participe` : la suppression
+        // filtre sur ce kind pour ne pas effacer aussi la réaction « tomate » du même compte.
+        "participation_add" -> api.insert("post_reactions", entry.payload, ignoreDuplicates = true).toUnit()
+        "participation_remove" -> api.delete(
+            "post_reactions",
+            listOf(
+                "post_id" to "eq.${fieldFromPayload(entry.payload, "post_id")}",
+                "user_id" to "eq.${fieldFromPayload(entry.payload, "user_id")}",
+                "kind" to "eq.participe",
+            ),
+        ).toUnit()
         "profile_upsert" -> api.insert("profiles", entry.payload, upsert = true, onConflict = "id").toUnit()
         "community_create" -> api.insert("communities", entry.payload, upsert = true, onConflict = "id").toUnit()
         "community_join" -> api.insert("community_members", entry.payload, upsert = true).toUnit()

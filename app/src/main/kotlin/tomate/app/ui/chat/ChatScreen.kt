@@ -16,7 +16,9 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,8 +40,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import tomate.app.ui.components.MessageBubble
+import tomate.app.ui.components.PollBubble
 import tomate.app.ui.vm.tomateViewModelFactory
 import tomate.core.designsystem.components.TomateEmptyState
+import tomate.data.extras.PollCodec
 import tomate.core.designsystem.components.TomateInlineNotice
 import tomate.core.designsystem.components.TomateTextField
 import tomate.core.designsystem.components.NoticeTone
@@ -143,10 +148,18 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(TomateSpacing.s),
             ) {
                 items(state.messages, key = { it.id }) { message ->
-                    MessageBubble(
-                        message = message,
-                        isMine = message.senderId == state.myId,
-                    )
+                    val isMine = message.senderId == state.myId
+                    val poll = PollCodec.decodePoll(message.body)
+                    if (poll != null) {
+                        PollBubble(
+                            poll = poll,
+                            tally = state.polls[message.id] ?: tomate.data.extras.PollTally(emptyMap(), 0, null),
+                            isMine = isMine,
+                            onVote = { index -> viewModel.vote(message.id, index) },
+                        )
+                    } else {
+                        MessageBubble(message = message, isMine = isMine)
+                    }
                 }
             }
         }
@@ -164,9 +177,57 @@ fun ChatScreen(
                 minLines = 1,
                 maxLines = 5,
             )
+            IconButton(onClick = viewModel::openPollDialog, enabled = !state.sending) {
+                Icon(Icons.Default.Poll, contentDescription = "Créer un sondage")
+            }
             IconButton(onClick = viewModel::send, enabled = !state.sending && state.text.isNotBlank()) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Envoyer")
             }
         }
+
+        if (state.pollDialogOpen) {
+            PollCreationDialog(state = state, viewModel = viewModel)
+        }
     }
+}
+
+@Composable
+private fun PollCreationDialog(state: ChatViewModel.UiState, viewModel: ChatViewModel) {
+    AlertDialog(
+        onDismissRequest = viewModel::closePollDialog,
+        title = { Text("Nouveau sondage") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(TomateSpacing.s),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TomateTextField(
+                    value = state.pollQuestion,
+                    onValueChange = viewModel::onPollQuestionChange,
+                    label = "Question",
+                    singleLine = true,
+                )
+                state.pollOptions.forEachIndexed { index, option ->
+                    TomateTextField(
+                        value = option,
+                        onValueChange = { viewModel.onPollOptionChange(index, it) },
+                        label = "Option ${index + 1}",
+                        singleLine = true,
+                    )
+                }
+                if (state.pollOptions.size < 3) {
+                    TextButton(onClick = viewModel::addPollOption) { Text("Ajouter une option") }
+                }
+                if (state.pollError != null) {
+                    TomateInlineNotice(text = state.pollError, tone = NoticeTone.Error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = viewModel::createPoll, enabled = !state.sending) { Text("Créer") }
+        },
+        dismissButton = {
+            TextButton(onClick = viewModel::closePollDialog) { Text("Annuler") }
+        },
+    )
 }

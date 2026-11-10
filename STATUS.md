@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.2.4
+# STATUS — TOMATE 0.2.5
 
 Dernière vérification : **10 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
 navigateur cloud Chromium pour la PWA.
@@ -10,8 +10,8 @@ Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est d�
 | Commande | Résultat |
 |---|---|
 | `:app:assembleDebug` | **BUILD SUCCESSFUL**, exit 0 |
-| APK | `artifacts/tomate-0.1.9-debug.apk` — 24 Mo, `versionCode 10` |
-| `:core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest` | **BUILD SUCCESSFUL**, 0 échec (data 15, net 15) |
+| APK | `artifacts/tomate-0.2.0-debug.apk` — 24 Mo, `versionCode 11` |
+| `:data:testDebugUnitTest` | **BUILD SUCCESSFUL**, 22 tests, 0 échec (dont 7 pour les protocoles sondage/vote/événement) |
 | `:data:assembleDebugAndroidTest` | compilé, non exécuté (appareil requis) |
 
 ## 2. PWA — build et tests réels
@@ -301,7 +301,66 @@ protocoles préfixés (`[[tomate:poll:v1]]`, `[[tomate:vote:v1]]…`, `[[tomate:
   n'est configuré ; sur deux réseaux distincts l'appel peut échouer de la même façon.
 - Le navigateur cloud n'a **ni micro ni caméra** : les tests média utilisent des flux synthétiques
   (`canvas.captureStream` + oscillateur), pas un périphérique réel.
-- **Android n'a pas ces fonctions** : sondages, événements et appels existent uniquement dans la
-  PWA. L'APK reste `0.1.9` (`versionCode 10`), inchangé depuis la dernière compilation.
+- **Android n'avait pas ces fonctions au moment de cette itération** : sondages, événements et
+  appels existaient uniquement dans la PWA. Sondages et événements ont depuis été portés (voir
+  § 2 nonies) ; **les appels restent PWA uniquement**.
 - Toujours non appliquées par le propriétaire : `0007` (notifications), `0008`, `0009` (médias).
 - Non entamé : refonte visuelle Android, E2EE réel, mesh A→B→C, modération administrateur, assistant.
+
+## 2 nonies. Itération 0.2.5 — relais TURN, diagnostic ICE et parité Android (vérifié le 10 novembre 2026)
+
+### Pourquoi
+
+Le § 2 octies laissait deux trous : un appel ne pouvait pas aboutir derrière un NAT restrictif
+(aucun TURN), et Android n'affichait ni sondages ni événements. Les deux sont traités ici, avec
+ce qui est réellement prouvé et ce qui ne l'est pas.
+
+### PWA — relais TURN configurable (`web/js/extras.js`, `web/js/app.js`)
+
+| Élément | Vérification |
+|---|---|
+| Réglages TURN (adresse, identifiant, mot de passe) dans **Paramètres → Appels : relais TURN** | carte rendue, formulaires relus depuis `localStorage`, adresse refusée si elle ne commence pas par `turn:`/`turns:` |
+| Enregistrement d'un relais | `localStorage['tomate.turn.v1']` contient l'adresse et les identifiants, diagnostic lancé automatiquement |
+| Diagnostic sans relais (aperçu `0.2.5-web`) | **« 1 local · 1 par STUN en 0.1 s — STUN répond ; ajoutez un TURN pour les réseaux restrictifs. »** |
+| Diagnostic avec un relais **hors service** (`turn:openrelay.metered.ca:80`) | **« 1 local · 1 par STUN en 8.0 s — TURN configuré mais aucun relais obtenu : vérifiez l'adresse, les identifiants et le réseau. »** — aucun candidat `relay`, l'app le dit |
+| Liste ICE réellement transmise aux appels | `iceServers()` renvoie STUN + TURN enregistré ; les deux `CallSession` (appel sortant et entrant) l'utilisent |
+
+### Android 0.2.0 — sondages et événements (`versionCode 11`)
+
+| Élément | Vérification |
+|---|---|
+| Codec partagé `data/extras/ConversationExtras.kt` | mêmes préfixes que le web (`[[tomate:poll:v1]]`, `[[tomate:vote:v1]]`, `[[tomate:event:v1]]`) |
+| Tests unitaires `ConversationExtrasTest` | **7 tests, 0 échec** : aller-retour sondage, options vides écartées, vote avec identifiant contenant `:`, dépouillement « un votant = une voix, dernier vote gagnant », événement avec date invalide refusé, relecture de chaînes produites par le client web |
+| Création de sondage (conversation) | dialogue question + 2 à 3 options, envoi par la même file locale que les messages ; aperçu de conversation « 📊 question » |
+| Vote | message de protocole, filtré de l'affichage ; barres et pourcentages recalculés depuis les messages reçus |
+| Création d'événement (fil) | bouton « Événement », date `AAAA-MM-JJ` + heure `HH:MM` converties en instant ISO du fuseau de l'appareil |
+| Affichage d'un événement | carte titre / date lisible / lieu / détails, à la place du corps brut, dans le fil et le détail |
+| « Je participe » (détail d'un événement) | `post_reactions kind='participe'` ; hors ligne, l'opération part dans la file locale (`participation_add` / `participation_remove`) |
+| Compilation | `:app:assembleDebug` exit 0 → `artifacts/tomate-0.2.0-debug.apk` |
+
+### Protocole Android vérifié contre le vrai serveur (REST, compte `verifmedia`)
+
+Publication `49deae70-1bbe-4310-a0bb-ed374c99658c` (« Apéro TOMATE ») :
+
+| Action | Résultat |
+|---|---|
+| `GET post_reactions?kind=eq.participe` | `[]` avant, `[{user_id: fb9b4773…}]` après insertion |
+| `POST kind=participe` | **201** (RLS l'autorise, clé PK `(post_id, user_id, kind)`) |
+| `DELETE …&kind=eq.participe` | **204**, relecture `[]` — suppression réelle |
+| `tomate` + `participe` du même compte, puis suppression ciblée `kind=eq.participe` | reste `[{kind: tomate}]` : le filtre par kind n'efface pas l'autre réaction |
+| Nettoyage | état serveur rendu à `[]` |
+
+### Limites de cette itération
+
+- **Aucun relais TURN opérationnel n'a pu être testé** : le relais public d'essai utilisé
+  (`openrelay.metered.ca`) ne renvoie plus de candidat `relay`. Le diagnostic prouve donc qu'il
+  détecte un relais **qui ne marche pas**, pas encore un relais qui marche. Aucun appel réel entre
+  deux réseaux n'a été établi.
+- Le navigateur cloud ne collecte **qu'un candidat `host` et un `srflx`** : suffisant pour un
+  appel LAN, insuffisant pour deux réseaux restrictifs.
+- **Android n'a pas d'appels** : la signalisation WebRTC native reste à écrire. Un appel lancé
+  depuis la PWA n'affiche rien sur Android, et les messages `[[tomate:call:v1]]` y sont masqués
+  au lieu d'apparaître en JSON.
+- **Aucun appareil Android ni émulateur** : l'APK est compilé, pas exécuté. Les écrans sondage et
+  événement ne sont donc **pas** vérifiés visuellement.
+- Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009`.

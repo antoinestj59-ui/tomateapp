@@ -273,11 +273,19 @@ class MessagingRepository(
     private fun handlePayload(conversationId: String, handle: String): String =
         """{"conversation_id":"$conversationId","handle":"$handle"}"""
 
-    /** Local-first send. Never loses the message: on failure it stays pending in the outbox. */
+    /**
+     * Local-first send. Never loses the message: on failure it stays pending in the outbox.
+     *
+     * [preview] remplace le texte affiché dans la liste des conversations quand le corps ne doit
+     * pas y apparaître tel quel (un sondage s'affiche « 📊 question »). [updatePreview] à false
+     * laisse l'aperçu intact : c'est le cas d'un vote, qui n'est pas un message lisible.
+     */
     suspend fun send(
         conversationId: String,
         body: String,
         replyToId: String? = null,
+        preview: String? = null,
+        updatePreview: Boolean = true,
     ): Outcome<Message> {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) {
@@ -309,7 +317,7 @@ class MessagingRepository(
             lastError = null,
         )
         messageDao.insert(entity)
-        updateConversationSummary(conversationId, trimmed, now)
+        if (updatePreview) updateConversationSummary(conversationId, preview ?: trimmed, now)
 
         val payload = SupabaseApi.json.encodeToString(
             MessageInsert.serializer(),

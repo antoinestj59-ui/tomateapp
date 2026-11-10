@@ -55,6 +55,7 @@ import tomate.core.model.Conversation
 import tomate.core.model.Message
 import tomate.core.model.MessageDeliveryState
 import tomate.core.model.Post
+import tomate.data.extras.EventCodec
 import tomate.core.model.Visibility
 import tomate.core.model.label
 
@@ -103,6 +104,11 @@ fun PostCard(
     onOpen: () -> Unit,
     onReact: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Renseignés pour un événement quand l'écran connaît la participation réelle. */
+    eventGoing: Int? = null,
+    eventGoingByMe: Boolean = false,
+    /** Bouton « Je participe » : absent quand l'écran ne peut pas l'assumer. */
+    onParticipate: (() -> Unit)? = null,
 ) {
     TomateCard(modifier = modifier, onClick = onOpen) {
         Column(modifier = Modifier.padding(TomateSpacing.l)) {
@@ -127,7 +133,16 @@ fun PostCard(
                     MetricPill(text = post.visibility.label)
                 }
             }
-            if (post.body.isNotBlank()) {
+            val event = EventCodec.decodeEvent(post.body)
+            if (event != null) {
+                Spacer(Modifier.height(TomateSpacing.m))
+                EventBlock(
+                    event = event,
+                    going = eventGoing,
+                    mine = eventGoingByMe,
+                    onToggle = onParticipate,
+                )
+            } else if (post.body.isNotBlank()) {
                 Spacer(Modifier.height(TomateSpacing.m))
                 Text(text = post.body, style = MaterialTheme.typography.bodyLarge)
             }

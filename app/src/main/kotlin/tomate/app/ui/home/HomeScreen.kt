@@ -239,6 +239,12 @@ fun HomeScreen(
                         onClick = { postPicker.launch("video/*") },
                         enabled = !state.posting,
                     )
+                    Spacer(Modifier.width(TomateSpacing.xs))
+                    TomateTonalButton(
+                        text = "Événement",
+                        onClick = viewModel::openEventComposer,
+                        enabled = !state.posting,
+                    )
                     Spacer(Modifier.weight(1f))
                     IconButton(
                         onClick = viewModel::publish,
@@ -307,6 +313,67 @@ fun HomeScreen(
             onPublish = viewModel::publishStory,
         )
     }
+
+    state.eventDraft?.let { draft ->
+        EventComposer(draft = draft, viewModel = viewModel)
+    }
+}
+
+/** Création d'un événement : une publication préfixée, relue par les deux clients. */
+@Composable
+private fun EventComposer(draft: HomeViewModel.EventDraft, viewModel: HomeViewModel) {
+    AlertDialog(
+        onDismissRequest = viewModel::closeEventComposer,
+        title = { Text("Nouvel événement") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(TomateSpacing.s)) {
+                TomateTextField(
+                    value = draft.title,
+                    onValueChange = viewModel::onEventTitleChange,
+                    label = "Titre",
+                    singleLine = true,
+                )
+                TomateTextField(
+                    value = draft.date,
+                    onValueChange = viewModel::onEventDateChange,
+                    label = "Date (AAAA-MM-JJ)",
+                    singleLine = true,
+                    supportingText = "Exemple : 2026-11-14",
+                )
+                TomateTextField(
+                    value = draft.time,
+                    onValueChange = viewModel::onEventTimeChange,
+                    label = "Heure (HH:MM)",
+                    singleLine = true,
+                )
+                TomateTextField(
+                    value = draft.place,
+                    onValueChange = viewModel::onEventPlaceChange,
+                    label = "Lieu (facultatif)",
+                    singleLine = true,
+                )
+                TomateTextField(
+                    value = draft.details,
+                    onValueChange = viewModel::onEventDetailsChange,
+                    label = "Détails (facultatif)",
+                    singleLine = false,
+                    minLines = 2,
+                    maxLines = 4,
+                )
+                draft.error?.let { message ->
+                    TomateInlineNotice(text = message, tone = NoticeTone.Error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = viewModel::publishEvent, enabled = !draft.posting) {
+                Text(if (draft.posting) "Publication…" else "Publier")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = viewModel::closeEventComposer) { Text("Annuler") }
+        },
+    )
 }
 
 @Composable

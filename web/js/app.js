@@ -35,6 +35,11 @@ import {
 import {
   CALL_PREFIX,
   CallSession,
+  clearTurnSettings,
+  gatherIceReport,
+  iceServers,
+  loadTurnSettings,
+  saveTurnSettings,
   decodeEvent,
   decodePoll,
   collectSignals,
@@ -100,6 +105,8 @@ const S = {
   notificationsError: null,
   authEmail: '',
   rsvps: {},
+  iceReport: null,
+  turnBusy: false,
   call: null,
   callWatch: null,
 };
@@ -2370,8 +2377,43 @@ async function signOut() {
 
 // ---------------------------------------------------------------- paramètres
 
+/** Lance la collecte ICE et résume honnêtement ce que l'appareil obtient. */
+async function runIceDiagnostic() {
+  S.iceReport = { summary: 'Collecte en cours…' };
+  S.turnBusy = true;
+  render();
+  const report = await gatherIceReport();
+  const parts = [];
+  if (report.types.host) parts.push(`${report.types.host} local`);
+  if (report.types.srflx) parts.push(`${report.types.srflx} par STUN`);
+  if (report.types.relay) parts.push(`${report.types.relay} par relais`);
+  const seconds = (report.ms / 1000).toFixed(1);
+  let verdict;
+  if (report.error) {
+    verdict = `diagnostic impossible (${report.error})`;
+  } else if (report.types.relay) {
+    verdict = 'relais TURN opérationnel : les réseaux restrictifs peuvent être traversés.';
+  } else if (report.hasTurn) {
+    verdict = 'TURN configuré mais aucun relais obtenu : vérifiez l\'adresse, les identifiants et le réseau.';
+  } else if (report.types.srflx) {
+    verdict = 'STUN répond ; ajoutez un TURN pour les réseaux restrictifs.';
+  } else if (parts.length) {
+    verdict = 'seuls des candidats locaux : ni STUN ni TURN ne répondent, un appel échouera.';
+  } else {
+    verdict = 'aucun candidat collecté : WebRTC est bloqué sur ce réseau.';
+  }
+  S.iceReport = {
+    summary: `${parts.join(' · ') || 'aucun candidat'} en ${seconds} s — ${verdict}`,
+    types: report.types,
+  };
+  S.turnBusy = false;
+  render();
+  toast(S.iceReport.summary);
+}
+
 function settingsView() {
   const caps = capabilities();
+  const turnSettings = loadTurnSettings();
   return shell(`
     <div class="card">
       <h2 style="margin-bottom:10px">Apparence</h2>
@@ -2422,6 +2464,32 @@ function settingsView() {
         <button class="btn btn-soft" data-act="export-data">${ICON.download} Exporter</button></div>
       <div class="settings-row"><div><strong>Vider le cache de contenu</strong><div class="tiny muted">Conserve le compte et la file d'attente</div></div>
         <button class="btn btn-danger" data-act="clear-cache">Vider</button></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-bottom:10px">Appels : relais TURN</h2>
+      <p class="small muted">Sans relais, un appel direct ne passe pas quand deux réseaux ne peuvent pas se joindre (4G, NAT symétrique, réseau d'entreprise). Un serveur TURN relaie alors le média. Ces champs restent sur cet appareil : ils ne sont envoyés ni à TOMATE ni à Supabase.</p>
+      ${turnSettings
+        ? `<p class="small"><strong>Relais actif :</strong> ${esc(turnSettings.url)}${turnSettings.username ? ` (identifiant ${esc(turnSettings.username)})` : ' (sans identifiant)'}</p>`
+        : `<p class="small muted">Aucun relais configuré : les appels utilisent seulement STUN.</p>`}
+      <form data-form="turn" class="col">
+        <div class="field">
+          <label for="turn-url">Adresse TURN</label>
+          <input class="input" id="turn-url" name="url" placeholder="turn:relais.exemple.fr:3478" value="${turnSettings ? esc(turnSettings.url) : ''}" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="turn-user">Identifiant (facultatif)</label>
+          <input class="input" id="turn-user" name="username" value="${turnSettings ? esc(turnSettings.username) : ''}" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="turn-secret">Mot de passe (facultatif)</label>
+          <input class="input" id="turn-secret" name="credential" type="password" value="${turnSettings ? esc(turnSettings.credential) : ''}" autocomplete="off" />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">${S.turnBusy ? 'Enregistrement…' : 'Enregistrer le relais'}</button>
+      </form>
+      <div class="settings-row" style="margin-top:10px"><div><strong>Diagnostic des candidats</strong><div class="tiny muted">${S.iceReport ? `${S.iceReport.summary}` : 'Vérifie que le STUN répond et que le relais TURN fonctionne'}</div></div>
+        <button class="btn btn-soft" data-act="ice-test">Tester</button></div>
+      ${turnSettings ? `<button class="btn btn-danger btn-block" data-act="turn-clear" style="margin-top:8px">Supprimer le relais</button>` : ''}
     </div>
 
     <div class="card">
@@ -3070,6 +3138,15 @@ document.addEventListener('click', async (event) => {
       case 'storage':
         await estimateStorage();
         break;
+      case 'ice-test':
+        await runIceDiagnostic();
+        break;
+      case 'turn-clear':
+        clearTurnSettings();
+        S.iceReport = null;
+        toast('Relais TURN supprimé : les appels utilisent de nouveau STUN seulement.');
+        render();
+        break;
       case 'clear-cache':
         if (await confirmDialog({ title: 'Vider le cache ?', text: 'Les publications, messages et météo en cache seront retéléchargés. Le compte et la file d\'attente sont conservés.', confirmLabel: 'Vider' })) {
           await clearStore('cache');
@@ -3201,6 +3278,20 @@ document.addEventListener('submit', async (event) => {
         location.hash = '#/feed';
         S.route = 'feed';
         await navigate();
+        break;
+      }
+      case 'turn': {
+        const url = String(data.get('url') ?? '').trim();
+        if (!url) throw new Error("Adresse TURN requise ; « Supprimer le relais » retire la configuration.");
+        const saved = saveTurnSettings({
+          url,
+          username: String(data.get('username') ?? ''),
+          credential: String(data.get('credential') ?? ''),
+        });
+        if (!saved.ok) throw new Error(saved.error);
+        S.iceReport = null;
+        toast('Relais enregistré sur cet appareil. Diagnostic en cours…');
+        await runIceDiagnostic();
         break;
       }
       case 'secure-account': {
@@ -3679,6 +3770,7 @@ async function startCall({ video }) {
     const session = new CallSession({
       transport: { send: (signal) => signalingSend(conversationId, signal) },
       video,
+      iceServers: iceServers(),
       onState: (state) => setCallStatus(dialog, state),
       onRemote: (stream) => {
         const remote = dialog.querySelector('.call-remote');
@@ -3714,6 +3806,7 @@ async function answerCall(offer) {
     const session = new CallSession({
       transport: { send: (signal) => signalingSend(conversationId, signal) },
       video,
+      iceServers: iceServers(),
       onState: (state) => setCallStatus(dialog, state),
       onRemote: (stream) => {
         const remote = dialog.querySelector('.call-remote');

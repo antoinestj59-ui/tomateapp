@@ -4,6 +4,9 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import tomate.core.model.AppError
 import tomate.core.model.Comment
 import tomate.core.model.Outcome
@@ -244,6 +247,71 @@ class FeedRepository(
         }
     }
 
+    /** Nombre de participants à un événement et participation de ce compte. */
+    data class Participation(val going: Int, val mine: Boolean)
+
+    /**
+     * « Je participe » est une ligne `post_reactions` de kind `participe`, sans nouvelle table.
+     * Le compte vient du serveur, jamais d'un compteur local : un événement ouvert ailleurs
+     * affiche le même nombre ici.
+     */
+    suspend fun participation(postId: String): Outcome<Participation> {
+        val me = session.currentUserId ?: return Outcome.Success(Participation(0, false))
+        if (session.isLocalAccount()) return Outcome.Success(Participation(0, false))
+        val query = listOf(
+            "post_id" to "eq.$postId",
+            "kind" to "eq.participe",
+            "select" to "user_id",
+        )
+        return when (val response = api.select("post_reactions", query)) {
+            is Outcome.Failure -> response
+            is Outcome.Success -> {
+                val ids = runCatching {
+                    SupabaseApi.json.parseToJsonElement(response.value).jsonArray.mapNotNull { row ->
+                        row.jsonObject["user_id"]?.jsonPrimitive?.content
+                    }
+                }.getOrElse { return Outcome.Failure(AppError.Unknown("Participations illisibles")) }
+                Outcome.Success(Participation(going = ids.size, mine = ids.contains(me)))
+            }
+        }
+    }
+
+    /** Rejoint ou quitte un événement. Hors ligne, l'opération part par la file locale. */
+    suspend fun setParticipation(postId: String, going: Boolean): Outcome<Unit> {
+        val userId = session.ensureActor().getOrNull()?.userId
+            ?: return Outcome.Failure(AppError.Unauthorized())
+        val payload = SupabaseApi.json.encodeToString(
+            ReactionInsert.serializer(),
+            ReactionInsert(postId = postId, userId = userId, kind = PARTICIPATION_KIND),
+        )
+        val key = "$postId:$userId"
+        if (SessionManager.isLocalId(userId)) {
+            enqueue(if (going) "participation_add" else "participation_remove", key, payload)
+            return Outcome.Success(Unit)
+        }
+        if (going) {
+            return when (val remote = api.insert("post_reactions", payload, ignoreDuplicates = true)) {
+                is Outcome.Success -> Outcome.Success(Unit)
+                is Outcome.Failure -> {
+                    enqueue("participation_add", key, payload)
+                    Outcome.Failure(remote.error)
+                }
+            }
+        }
+        val filter = listOf(
+            "post_id" to "eq.$postId",
+            "user_id" to "eq.$userId",
+            "kind" to "eq.$PARTICIPATION_KIND",
+        )
+        return when (val remote = api.delete("post_reactions", filter)) {
+            is Outcome.Success -> Outcome.Success(Unit)
+            is Outcome.Failure -> {
+                enqueue("participation_remove", key, payload)
+                Outcome.Failure(remote.error)
+            }
+        }
+    }
+
     suspend fun addComment(postId: String, body: String, parentId: String? = null): Outcome<Comment> {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) {
@@ -305,5 +373,6 @@ class FeedRepository(
     companion object {
         const val MAX_POST_LENGTH = 2000
         const val MAX_COMMENT_LENGTH = 1000
+        const val PARTICIPATION_KIND = "participe"
     }
 }

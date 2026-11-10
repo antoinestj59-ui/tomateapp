@@ -15,6 +15,10 @@ import tomate.core.model.Outcome
 import tomate.core.model.Post
 import tomate.core.model.Story
 import tomate.data.container.TomateContainer
+import tomate.data.extras.EventCodec
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import tomate.data.repo.StoryRepository
 
 class HomeViewModel(private val container: TomateContainer) : ViewModel() {
@@ -27,6 +31,20 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val mimeType: String? = null,
         val extension: String = "jpg",
         val mediaLabel: String? = null,
+    )
+
+    /**
+     * Brouillon d'événement. La date et l'heure sont saisies en clair (AAAA-MM-JJ / HH:MM)
+     * puis converties en instant ISO : aucun fuseau n'est deviné côté serveur.
+     */
+    data class EventDraft(
+        val title: String = "",
+        val date: String = "",
+        val time: String = "19:00",
+        val place: String = "",
+        val details: String = "",
+        val posting: Boolean = false,
+        val error: String? = null,
     )
 
     data class StoryDraft(
@@ -69,6 +87,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val hasProfile: Boolean = false,
         val myId: String? = null,
         val storyDraft: StoryDraft? = null,
+        val eventDraft: EventDraft? = null,
     )
 
     private val loading = MutableStateFlow(true)
@@ -76,6 +95,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
     private val composer = MutableStateFlow(Composer())
     private val error = MutableStateFlow<AppError?>(null)
     private val storyDraft = MutableStateFlow<StoryDraft?>(null)
+    private val eventDraft = MutableStateFlow<EventDraft?>(null)
     private val now = MutableStateFlow(System.currentTimeMillis())
 
     private val base = combine(
@@ -106,7 +126,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         stories.filterNot { it.isExpired(instant) }
     }
 
-    val state: StateFlow<UiState> = combine(base, activeStories, storyDraft) { b, stories, draft ->
+    val state: StateFlow<UiState> = combine(base, activeStories, storyDraft, eventDraft) { b, stories, draft, event ->
         UiState(
             posts = b.posts,
             stories = stories,
@@ -121,6 +141,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             hasProfile = b.hasProfile,
             myId = b.myId,
             storyDraft = draft,
+            eventDraft = event,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState())
 
@@ -209,6 +230,79 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             val result = container.feed.toggleReaction(post.id, post.reactedByMe)
             if (result is Outcome.Failure && !result.error.isOffline) {
                 error.value = result.error
+            }
+        }
+    }
+
+    // -------------------------------------------------------------- événements
+
+    fun openEventComposer() {
+        eventDraft.value = EventDraft()
+    }
+
+    fun closeEventComposer() {
+        eventDraft.value = null
+    }
+
+    fun onEventTitleChange(value: String) {
+        eventDraft.value = eventDraft.value?.copy(title = value.take(120), error = null)
+    }
+
+    fun onEventDateChange(value: String) {
+        eventDraft.value = eventDraft.value?.copy(date = value.take(10), error = null)
+    }
+
+    fun onEventTimeChange(value: String) {
+        eventDraft.value = eventDraft.value?.copy(time = value.take(5), error = null)
+    }
+
+    fun onEventPlaceChange(value: String) {
+        eventDraft.value = eventDraft.value?.copy(place = value.take(120))
+    }
+
+    fun onEventDetailsChange(value: String) {
+        eventDraft.value = eventDraft.value?.copy(details = value.take(400))
+    }
+
+    /** Un événement est une publication : même stockage, mêmes règles de visibilité. */
+    fun publishEvent() {
+        val draft = eventDraft.value ?: return
+        if (draft.title.isBlank()) {
+            eventDraft.value = draft.copy(error = "Un titre est nécessaire.")
+            return
+        }
+        val startsAt = runCatching {
+            LocalDate.parse(draft.date.trim())
+                .atTime(LocalTime.parse(draft.time.trim()))
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toString()
+        }.getOrNull()
+        if (startsAt == null) {
+            eventDraft.value = draft.copy(error = "Date au format AAAA-MM-JJ et heure HH:MM.")
+            return
+        }
+        val body = EventCodec.encodeEvent(draft.title, startsAt, draft.place, draft.details)
+        if (body == null) {
+            eventDraft.value = draft.copy(error = "Événement invalide.")
+            return
+        }
+        viewModelScope.launch {
+            eventDraft.value = draft.copy(posting = true, error = null)
+            when (val result = container.feed.createPost(body = body)) {
+                is Outcome.Success -> {
+                    eventDraft.value = null
+                    runCatching { container.sync.drain() }
+                }
+                is Outcome.Failure -> {
+                    // Hors ligne, la publication est déjà dans la file : on ferme sans mentir.
+                    if (result.error.isOffline) {
+                        eventDraft.value = null
+                    } else {
+                        error.value = result.error
+                        eventDraft.value = draft.copy(posting = false, error = result.error.userMessage)
+                    }
+                }
             }
         }
     }
