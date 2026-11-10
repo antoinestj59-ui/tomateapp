@@ -86,8 +86,13 @@ class CallEngine(
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private var speakerOn = true
 
-    /** L'EGL partagé par les rendus locaux et distants. */
-    val eglBase: EglBase by lazy { EglBase.create() }
+    private var eglReady = false
+
+    /** L'EGL partagé par les rendus locaux et distants, créé au premier appel seulement. */
+    val eglBase: EglBase by lazy {
+        eglReady = true
+        EglBase.create()
+    }
 
     private fun factory(context: Context): PeerConnectionFactory = Rtc.factory(context, eglBase)
 
@@ -369,6 +374,10 @@ class CallEngine(
     fun release() {
         hangUp("Appel terminé")
         _state.value = Snapshot()
+        if (eglReady) {
+            eglReady = false
+            runCatching { eglBase.release() }
+        }
     }
 
     private inner class PeerObserver : PeerConnection.Observer {

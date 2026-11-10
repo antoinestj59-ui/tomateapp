@@ -230,7 +230,8 @@ fun ChatScreen(
             PollCreationDialog(state = state, viewModel = viewModel)
         }
 
-        CallOverlay(
+        // Le contexte OpenGL n'est créé qu'à partir du premier appel, pas à l'ouverture du fil.
+        if (call.stage != tomate.app.call.CallEngine.Stage.Idle) CallOverlay(
             snapshot = call,
             eglBase = viewModel.eglBase,
             onAccept = viewModel::acceptCall,
