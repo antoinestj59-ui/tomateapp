@@ -1,29 +1,50 @@
 package tomate.data.e2ee
 
+import tomate.core.crypto.E2ee
+
 /**
- * End-to-end encryption boundary.
+ * Frontière du chiffrement de bout en bout.
  *
- * HONEST STATUS: E2EE is **not operational** in this version. The only implementation shipped
- * is [E2eeNotConfigured], which reports the truth to the UI so that messages are clearly labelled
- * as not end-to-end encrypted. No custom cryptography exists anywhere in TOMATE.
- *
- * Candidate protocols, evaluated in docs/04_SECURITE.md §5:
- *  - libsignal-android 0.76.1 (org.signal:libsignal-android, available on Maven Central) —
- *    the real Signal protocol (X3DH + Double Ratchet). Requires prekey publication, session
- *    store, safety-number UI and a server component; a partial integration would be worse than
- *    none, so it is planned as a dedicated milestone, not faked.
- *  - MLS (RFC 9420) for groups — no maintained Kotlin/Android implementation verified yet.
+ * État réel de cette version (0.5.0) : les conversations **1-1** sont chiffrées côté client avec
+ * P-256 + HKDF-SHA256 + AES-256-GCM et signées en ECDSA, exactement comme le fait la PWA
+ * (`web/js/e2ee.js`, vérifié par `E2eeInteropTest`). Les **groupes ne sont pas chiffrés**, et il
+ * n'y a pas de Double Ratchet : l'interface le dit, elle ne prétend rien de plus.
  */
 interface E2eeEngine {
+
     val status: E2eeStatus
 
-    /** Encrypts a message for one conversation. Must throw if E2EE is not operational. */
-    suspend fun encrypt(conversationId: String, plaintext: String): E2eeResult
+    /**
+     * Prépare un message sortant.
+     *
+     * @param peerId identifiant de l'autre participant pour une conversation 1-1, `null` pour un
+     *   groupe (qui n'est pas chiffré) : dans ce cas le texte part en clair et [Cipher.Ok.encrypted]
+     *   vaut `false`, ce qui permet à l'interface de rester honnête.
+     */
+    suspend fun prepareOutgoing(
+        conversationId: String,
+        senderId: String,
+        peerId: String?,
+        plaintext: String,
+    ): Cipher
 
-    suspend fun decrypt(conversationId: String, ciphertext: String): E2eeResult
+    /** Ouvre un message reçu : déchiffre si nécessaire, rend le texte affichable. */
+    suspend fun openIncoming(
+        conversationId: String,
+        senderId: String,
+        body: String,
+    ): Cipher
 
-    /** Publish this device's identity/prekeys to the backend. */
+    /** Publie les clés publiques de cet appareil (annuaire), sans jamais envoyer les privées. */
     suspend fun publishIdentityKeys(): E2eeResult
+
+    sealed interface Cipher {
+        /** [text] est affichable (reçu) ou envoyable (sortant). */
+        data class Ok(val text: String, val encrypted: Boolean) : Cipher
+
+        /** Le message est chiffré mais ne peut pas être ouvert : on l'affiche comme tel. */
+        data class Failed(val reason: String) : Cipher
+    }
 
     sealed interface E2eeResult {
         data class Ok(val payload: String) : E2eeResult
@@ -32,33 +53,44 @@ interface E2eeEngine {
 }
 
 enum class E2eeStatus {
-    /** No E2EE: content is stored and transmitted unencrypted (transport security only). */
+    /** Aucune identité : rien n'est chiffré, et l'interface le dit. */
     NotConfigured,
 
-    /** Keys published, sessions established, audited: safe to label messages as E2EE. */
+    /** Identité prête : les conversations 1-1 sont chiffrées de bout en bout. */
     Operational,
 }
 
+/** Libellé affiché partout où l'état du chiffrement est montré. */
+fun E2eeStatus.badgeLabel(): String = when (this) {
+    E2eeStatus.NotConfigured -> "Non chiffré de bout en bout"
+    E2eeStatus.Operational -> "Chiffré de bout en bout (1-1)"
+}
+
 /**
- * The shipped implementation. It refuses to pretend: [encrypt] and [decrypt] fail explicitly.
+ * Implémentation neutre conservée pour les tests et pour tout code construit sans identité :
+ * elle refuse explicitement au lieu de laisser croire à un chiffrement.
  */
 class E2eeNotConfigured : E2eeEngine {
     override val status: E2eeStatus = E2eeStatus.NotConfigured
 
-    override suspend fun encrypt(conversationId: String, plaintext: String): E2eeEngine.E2eeResult =
-        E2eeEngine.E2eeResult.Failed(
-            "Le chiffrement de bout en bout n'est pas encore opérationnel : ce message n'est pas chiffré de bout en bout.",
-        )
+    override suspend fun prepareOutgoing(
+        conversationId: String,
+        senderId: String,
+        peerId: String?,
+        plaintext: String,
+    ): E2eeEngine.Cipher = E2eeEngine.Cipher.Ok(plaintext, encrypted = false)
 
-    override suspend fun decrypt(conversationId: String, ciphertext: String): E2eeEngine.E2eeResult =
-        E2eeEngine.E2eeResult.Failed("Le chiffrement de bout en bout n'est pas opérationnel.")
+    override suspend fun openIncoming(
+        conversationId: String,
+        senderId: String,
+        body: String,
+    ): E2eeEngine.Cipher =
+        if (E2ee.isEncrypted(body)) {
+            E2eeEngine.Cipher.Failed("Message chiffré : aucune clé de déchiffrement sur cet appareil.")
+        } else {
+            E2eeEngine.Cipher.Ok(body, encrypted = false)
+        }
 
     override suspend fun publishIdentityKeys(): E2eeEngine.E2eeResult =
-        E2eeEngine.E2eeResult.Failed("Aucune clé E2EE n'est publiée dans cette version.")
-}
-
-/** User-facing label used everywhere a message is displayed. */
-fun E2eeStatus.badgeLabel(): String = when (this) {
-    E2eeStatus.NotConfigured -> "Non chiffré de bout en bout"
-    E2eeStatus.Operational -> "Chiffré de bout en bout"
+        E2eeEngine.E2eeResult.Failed("Aucune identité de chiffrement dans cette version.")
 }

@@ -159,30 +159,32 @@ fun OnboardingScreen(
 @Composable
 private fun VisibilityChooser(selected: Visibility, onSelect: (Visibility) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(TomateSpacing.xs)) {
-        Visibility.entries.forEach { option ->
-            val isSelected = option == selected
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                androidx.compose.material3.RadioButton(
-                    selected = isSelected,
-                    onClick = { onSelect(option) },
-                )
-                Column {
-                    Text(text = option.label, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        text = when (option) {
-                            Visibility.Public -> "Visible par tous les comptes connectés."
-                            Visibility.Followers -> "Visible par vos abonnés."
-                            Visibility.Community -> "Visible dans vos communautés."
-                            Visibility.Private -> "Visible uniquement par vous."
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Visibility.entries
+            .filter { it != Visibility.Followers }
+            .forEach { option ->
+                val isSelected = option == selected
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.RadioButton(
+                        selected = isSelected,
+                        onClick = { onSelect(option) },
                     )
+                    Column {
+                        Text(text = option.label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = when (option) {
+                                Visibility.Public -> "Visible par tous les comptes connectés."
+                                Visibility.Followers -> "Visible par vos abonnés."
+                                Visibility.Community -> "Visible dans vos communautés."
+                                Visibility.Private -> "Visible uniquement par vous."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
-        }
     }
 }

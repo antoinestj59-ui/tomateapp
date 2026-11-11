@@ -30,6 +30,7 @@ class SyncEngineTest {
 
     private class FakeRemote : OutboxRemote {
         val inserts = mutableListOf<Call>()
+        val updates = mutableListOf<Triple<String, String, String>>()
         var nextResult: Outcome<String> = Outcome.Success("")
         var selects: MutableList<String> = mutableListOf()
 
@@ -42,6 +43,15 @@ class SyncEngineTest {
             ignoreDuplicates: Boolean,
         ): Outcome<String> {
             inserts += Call(table, body, upsert, onConflict, ignoreDuplicates)
+            return nextResult
+        }
+
+        override suspend fun update(
+            table: String,
+            filter: List<Pair<String, String>>,
+            body: String,
+        ): Outcome<String> {
+            updates += Triple(table, filter.joinToString { "${it.first}=${it.second}" }, body)
             return nextResult
         }
 
@@ -232,6 +242,50 @@ class SyncEngineTest {
 
         assertEquals(1, discarded)
         assertEquals(0, outbox.total())
+    }
+
+    @Test
+    fun `replaying a post update patches the row by id`() = runTest {
+        val remote = FakeRemote()
+        val outbox = FakeOutbox()
+        outbox.enqueue(entry("post_update", """{"id":"p1","body":"nouveau"}"""))
+
+        val report = SyncEngine(remote, outbox, clock = { 1_000 }).drain()
+
+        assertEquals(1, report.succeeded)
+        val update = remote.updates.single()
+        assertEquals("posts", update.first)
+        assertTrue("le PATCH cible la publication", update.second.contains("p1"))
+        assertTrue("le corps porte le nouveau texte", update.third.contains("nouveau"))
+    }
+
+    @Test
+    fun `replaying a conversation rename patches the title`() = runTest {
+        val remote = FakeRemote()
+        val outbox = FakeOutbox()
+        outbox.enqueue(entry("conversation_rename", """{"conversation_id":"c1","title":"Groupe Jardin"}"""))
+
+        val report = SyncEngine(remote, outbox, clock = { 1_000 }).drain()
+
+        assertEquals(1, report.succeeded)
+        val update = remote.updates.single()
+        assertEquals("conversations", update.first)
+        assertTrue(update.second.contains("c1"))
+        assertTrue(update.third.contains("Groupe Jardin"))
+    }
+
+    @Test
+    fun `replaying a message reaction ignores duplicates`() = runTest {
+        val remote = FakeRemote()
+        val outbox = FakeOutbox()
+        outbox.enqueue(entry("message_reaction_add", """{"message_id":"m1","user_id":"u1","emoji":"🍅"}"""))
+
+        SyncEngine(remote, outbox, clock = { 1_000 }).drain()
+
+        val call = remote.inserts.single()
+        assertEquals("message_reactions", call.table)
+        assertTrue(call.ignoreDuplicates)
+        assertEquals("message_id,user_id,emoji", call.onConflict)
     }
 
     @Test

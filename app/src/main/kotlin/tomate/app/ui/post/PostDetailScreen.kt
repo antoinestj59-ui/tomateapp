@@ -88,6 +88,10 @@ fun PostDetailScreen(
                     )
                     if (state.isMine) {
                         DropdownMenuItem(
+                            text = { Text("Modifier ma publication") },
+                            onClick = { menuOpen = false; viewModel.startEdit() },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Supprimer ma publication") },
                             onClick = { menuOpen = false; viewModel.delete(); onBack() },
                         )
@@ -200,6 +204,30 @@ fun PostDetailScreen(
                 }
             }
         }
+    }
+
+    val editing by viewModel.editingFlows().collectAsStateWithLifecycle(initialValue = false to "")
+    if (editing.first) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelEdit,
+            title = { Text("Modifier la publication") },
+            text = {
+                TomateTextField(
+                    value = editing.second,
+                    onValueChange = viewModel::onEditChange,
+                    label = "Publication",
+                    singleLine = false,
+                    minLines = 3,
+                    maxLines = 8,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmEdit) { Text("Enregistrer") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelEdit) { Text("Annuler") }
+            },
+        )
     }
 
     if (reportDialog) {

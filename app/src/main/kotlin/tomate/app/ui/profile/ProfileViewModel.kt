@@ -34,6 +34,10 @@ class ProfileViewModel(private val container: TomateContainer) : ViewModel() {
         val e2eeLabel: String = "Non chiffré de bout en bout",
         val userId: String? = null,
         val pendingOperations: Int = 0,
+        /** Nombre réel de publications de ce compte (fil local, alimenté par le serveur). */
+        val myPostCount: Int = 0,
+        /** Nombre réel de communautés dont ce compte est membre. */
+        val myCommunityCount: Int = 0,
     )
 
     private data class EditState(
@@ -70,8 +74,14 @@ class ProfileViewModel(private val container: TomateContainer) : ViewModel() {
             ActionState(saving, error, code, status)
         },
         container.moderation.observeBlocked(),
-        container.database.outboxDao().observeCount(),
-    ) { profile, edit, action, blocked, pending ->
+        combine(
+            container.database.outboxDao().observeCount(),
+            container.feed.observeFeed(),
+            container.communities.observeMine(),
+        ) { pending, posts, communities ->
+            Triple(pending, posts, communities.size)
+        },
+    ) { profile, edit, action, blocked, counts ->
         UiState(
             profile = profile,
             editing = edit.open,
@@ -84,7 +94,9 @@ class ProfileViewModel(private val container: TomateContainer) : ViewModel() {
             recoveryCode = action.code,
             recoveryStatus = action.status,
             blocked = blocked,
-            pendingOperations = pending,
+            pendingOperations = counts.first,
+            myPostCount = counts.second.count { it.authorId == profile?.id },
+            myCommunityCount = counts.third,
             e2eeLabel = container.e2ee.status.badgeLabel(),
             userId = container.session.currentUserId,
         )

@@ -30,6 +30,8 @@ class CommunityDetailViewModel(
         val error: AppError? = null,
         val canPost: Boolean = false,
         val isModerator: Boolean = false,
+        val members: List<tomate.data.repo.CommunityMember> = emptyList(),
+        val membersLoading: Boolean = false,
     )
 
     private val loading = MutableStateFlow(true)
@@ -37,13 +39,16 @@ class CommunityDetailViewModel(
     private val posting = MutableStateFlow(false)
     private val busy = MutableStateFlow(false)
     private val error = MutableStateFlow<AppError?>(null)
+    private val members = MutableStateFlow<List<tomate.data.repo.CommunityMember>>(emptyList())
+    private val membersLoading = MutableStateFlow(false)
 
     val state: StateFlow<UiState> = combine(
         container.communities.observe(communityId),
         container.feed.observeFeed(communityId),
         combine(loading, composer) { l, c -> l to c },
         combine(posting, combine(busy, error) { b, e -> b to e }) { p, be -> Triple(p, be.first, be.second) },
-    ) { community, posts, loadingPair, actionTriple ->
+        combine(members, membersLoading) { list, loadingMembers -> list to loadingMembers },
+    ) { community, posts, loadingPair, actionTriple, membersPair ->
         val membership = community?.myMembership
         UiState(
             community = community,
@@ -56,6 +61,8 @@ class CommunityDetailViewModel(
             canPost = membership == MembershipStatus.Active,
             isModerator = community?.myRole == tomate.core.model.CommunityRole.Owner ||
                 community?.myRole == tomate.core.model.CommunityRole.Moderator,
+            members = membersPair.first,
+            membersLoading = membersPair.second,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState())
 
@@ -66,6 +73,7 @@ class CommunityDetailViewModel(
     fun refresh() {
         viewModelScope.launch {
             loading.value = true
+            loadMembers()
             runCatching { container.communities.refresh() }
             val result = container.feed.refreshFeed(communityId)
             if (result is Outcome.Failure) error.value = result.error
@@ -116,6 +124,28 @@ class CommunityDetailViewModel(
                 is Outcome.Failure -> error.value = result.error
             }
             busy.value = false
+        }
+    }
+
+    /** Membres visibles côté serveur (RLS) : aucune liste inventée. */
+    private suspend fun loadMembers() {
+        membersLoading.value = true
+        when (val result = container.communities.members(communityId)) {
+            is Outcome.Success -> members.value = result.value
+            is Outcome.Failure -> if (!result.error.isOffline) error.value = result.error
+        }
+        membersLoading.value = false
+    }
+
+    fun reloadMembers() {
+        viewModelScope.launch { loadMembers() }
+    }
+
+    /** Réaction réelle à une publication de la communauté (même chemin que le fil). */
+    fun react(post: Post) {
+        viewModelScope.launch {
+            val result = container.feed.toggleReaction(post.id, post.reactedByMe)
+            if (result is Outcome.Failure && !result.error.isOffline) error.value = result.error
         }
     }
 

@@ -18,7 +18,7 @@ Rien de ce qui suit la section 5 n'est implémenté.
 | Transports BLE (GATT serveur + client) et Wi-Fi local (NSD + TCP) | code livré | **jamais exécuté sur matériel** (aucune radio ici) |
 | Relais activé par défaut | oui (`SettingsStore.relayEnabled = true`) | lecture du code |
 | File de relais persistante | **non** : mémoire, 200 entrées, rien sur disque | décision ADR-005 |
-| Chiffrement de bout en bout | **non** : `E2eeNotConfigured`, l'UI l'annonce | `docs/04_SECURITE.md` |
+| Chiffrement de bout en bout 1-1 | **oui depuis 0.5.0** : ECIES P-256 + AAD + signature ECDSA, interopérable avec la PWA | `E2eeTest`, `E2eeInteropTest`, `verify_050_e2ee.sh` |
 | Chaîne de messages entre deux comptes, en ligne | **oui, vérifiée** : conversation créée par un compte, membre ajouté, messages des deux côtés lus par l'autre (4 × HTTP 201) | tests réseau du 9 novembre 2026 |
 | Ajout d'ami par QR (PWA) | **oui** : QR généré (payload `tomato://add?u=…`), collage du lien, création de conversation même hors ligne, scan caméra si `BarcodeDetector` est disponible | test navigateur |
 | Flammes 🔥 | **oui** : jours consécutifs où **les deux** ont écrit, calculés à partir des messages réels, affichés hors ligne | test navigateur (🔥 2 sur deux jours réels) |
@@ -171,3 +171,38 @@ Tant que R4/R5 ne sont pas terminés **et vérifiés**, l'interface continue d'a
 - Meshtastic — limites du chiffrement :
   <https://meshtastic.org/docs/about/overview/encryption/limitations>
 - SimpleX — plateforme : <https://simplex.chat/docs/simplex.html>
+
+## 7. État au 10 novembre 2026 (itération 0.5.0)
+
+Le tableau de la section 5 est mis à jour ci-dessous : ce qui est **du code testé** est distingué de
+ce qui reste **non exécuté faute de matériel**.
+
+| Étape | État 0.5.0 | Preuve |
+|---|---|---|
+| R1 — courier borné | **fait au niveau protocole** : `CourierStore` (200 entrées, TTL 24 h, purge, drop-oldest, remise par tag rotatif) | 4 tests JVM `CourierStoreTest` |
+| R2 — QR enrichi (identité + clés + adresses) | **identité + clés faites** (lien `tomate://pair`, QR ZXing, NDEF) ; les adresses de transport ne sont pas encore dans le lien | `PairingLinkTest`, `PairingTest` (QR réel en pixels, NDEF aller-retour) |
+| R3 — signature des enveloppes | **fait** : `MeshPacket` signé ECDSA, vérifié avant relais | `MeshRouterTest` (signature valide → relais, altérée → rejet) |
+| R4 — E2EE 1-1 | **fait** (ECIES P-256, pas de Double Ratchet) | 10 tests + interop Node + HTTP réel |
+| R5 — E2EE PWA compatible Android | **fait** : même module, même format | `E2eeInteropTest` |
+| R6 — relais multi-sauts | **politique faite, radio non testée** : TTL 7 décrémenté, déduplication LRU 1000/5 min, split horizon, délai aléatoire, opt-out | 9 tests `MeshRouterTest` |
+| R7 — mode sans Internet complet | **non** : dépend du test matériel BLE/Wi-Fi | — |
+
+### Ce que le maillage emprunte à bitchat, et pourquoi
+
+| Mécanisme bitchat | Reprise dans TOMATE | Fichier |
+|---|---|---|
+| En-tête clair + contenu opaque | `T2|id|type|origine|dest|ttl|date|sig|payload` | `MeshPacket.kt` |
+| TTL 7 décrémenté, fanout plein pour les paquets dirigés | `MeshRouter.receive` → `Forward(ttl-1)` | `MeshRouter.kt` |
+| Déduplication LRU 1000 / 5 min sur `(origine, id)` | `seen` borné + fenêtre | `MeshRouter.kt` |
+| Split horizon + délai aléatoire | `exceptLink` + `delayMs` (0–250 ms) | `MeshRouter.kt` |
+| Courier borné, tag de destinataire rotatif quotidien | `CourierStore` + `recipientTag(userId, epochDay)` | `MeshRouter.kt`, `MeshPacket.kt` |
+| Signature vérifiée avant relais | `MeshRouter.verifierFor` (ECDSA P-256) | `MeshRouter.kt` |
+
+### Différences assumées
+
+- **Pas de Noise** : TOMATE utilise son propre ECIES P-256 (décrit dans `core/crypto/E2ee.kt`), déjà
+  interopérable avec la PWA. Ajouter Noise aurait dupliqué deux protocoles.
+- **Pas de fragments propres au maillage** : la fragmentation existante (`EnvelopeCodec`) suffit au
+  transport et est déjà testée.
+- **Pas de relais Internet (Nostr)** : hors périmètre.
+- **Rien de tout cela n'a tourné sur deux téléphones** : la politique est testée, la radio non.

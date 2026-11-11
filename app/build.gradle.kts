@@ -17,8 +17,8 @@ android {
         applicationId = "app.tomate"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.3.1"
+        versionCode = 16
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -53,6 +53,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.zxing:core:3.5.3")
     implementation(project(":core"))
     implementation(project(":data"))
     implementation(project(":net"))

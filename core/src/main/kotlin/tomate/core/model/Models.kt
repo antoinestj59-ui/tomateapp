@@ -140,6 +140,8 @@ data class Message(
     val transport: TransportKind? = null,
     val encrypted: Boolean = false,
     val replyToId: String? = null,
+    /** Vrai quand le message est chiffré mais que la clé nécessaire manque sur cet appareil. */
+    val ciphertextUnreadable: Boolean = false,
 )
 
 /** A peer discovered on a nearby transport. Never persisted beyond the discovery window. */

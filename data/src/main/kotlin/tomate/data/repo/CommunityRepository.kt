@@ -4,6 +4,9 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import tomate.core.model.AppError
 import tomate.core.model.Community
 import tomate.core.model.CommunityRole
@@ -22,6 +25,17 @@ import tomate.data.db.OutboxDao
 import tomate.data.db.OutboxEntity
 import tomate.data.mapper.toDomain
 import tomate.data.mapper.toEntity
+
+/**
+ * Membre d'une communauté, tel qu'affiché dans l'onglet « Membres ».
+ * [role] reprend le rôle serveur (`Owner`, `Moderator`, `Member`) sans le réécrire.
+ */
+data class CommunityMember(
+    val id: String,
+    val handle: String,
+    val displayName: String,
+    val role: String? = null,
+)
 
 /**
  * Communities with public/private visibility and role-based moderation.
@@ -217,6 +231,82 @@ class CommunityRepository(
             is Outcome.Success -> Outcome.Success(Unit)
             is Outcome.Failure -> Outcome.Failure(remote.error)
         }
+    }
+
+    /**
+     * Membres lisibles d'une communauté (onglet « Membres »).
+     *
+     * Deux lectures : les adhésions, puis les profils correspondants. Les profils invisibles
+     * sont simplement absents (RLS), sans erreur : le client n'invente aucun nom.
+     */
+    suspend fun members(communityId: String, limit: Int = 100): Outcome<List<CommunityMember>> {
+        val rows = when (
+            val result = api.select(
+                table = "community_members",
+                query = listOf(
+                    "select" to "user_id,role",
+                    "community_id" to "eq.$communityId",
+                    "limit" to limit.toString(),
+                ),
+                single = false,
+            )
+        ) {
+            is Outcome.Failure -> return Outcome.Failure(result.error)
+            is Outcome.Success -> result.value
+        }
+        val ids = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(rows).jsonArray
+                .mapNotNull { element ->
+                    (element as? kotlinx.serialization.json.JsonObject)
+                        ?.get("user_id")?.jsonPrimitive?.contentOrNull
+                }
+        }.getOrDefault(emptyList())
+        if (ids.isEmpty()) return Outcome.Success(emptyList())
+
+        val profiles = when (
+            val result = api.select(
+                table = "profiles",
+                query = listOf(
+                    "select" to "id,handle,display_name",
+                    "id" to "in.(${ids.joinToString(",")})",
+                ),
+                single = false,
+            )
+        ) {
+            is Outcome.Failure -> return Outcome.Failure(result.error)
+            is Outcome.Success -> result.value
+        }
+
+        val byId = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(profiles).jsonArray
+                .mapNotNull { element ->
+                    val obj = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    id to CommunityMember(
+                        id = id,
+                        handle = obj["handle"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        displayName = obj["display_name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        role = null,
+                    )
+                }
+                .toMap()
+        }.getOrDefault(emptyMap())
+
+        val roles = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(rows).jsonArray
+                .mapNotNull { element ->
+                    val obj = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                    val id = obj["user_id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    id to obj["role"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                }
+                .toMap()
+        }.getOrDefault(emptyMap())
+
+        return Outcome.Success(
+            ids.mapNotNull { id ->
+                byId[id]?.copy(role = roles[id]?.takeIf { it.isNotBlank() })
+            },
+        )
     }
 
     private suspend fun enqueue(kind: String, key: String, payload: String) {

@@ -13,6 +13,8 @@ data class ProfileDto(
     val bio: String = "",
     @SerialName("avatar_path") val avatarPath: String? = null,
     val visibility: String = "Public",
+    @SerialName("e2ee_agree_key") val e2eeAgreeKey: String? = null,
+    @SerialName("e2ee_sign_key") val e2eeSignKey: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
 )

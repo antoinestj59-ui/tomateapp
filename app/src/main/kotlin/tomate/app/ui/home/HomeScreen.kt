@@ -35,7 +35,9 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -64,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -74,6 +77,8 @@ import tomate.app.ui.components.PostCard
 import tomate.app.ui.vm.tomateViewModelFactory
 import tomate.core.designsystem.components.MetricPill
 import tomate.core.designsystem.components.NoticeTone
+import tomate.core.designsystem.components.TomateAvatar
+import tomate.core.designsystem.components.TomateCountBadge
 import tomate.core.designsystem.components.TomateCard
 import tomate.core.designsystem.components.TomateEmptyState
 import tomate.core.designsystem.components.TomateInlineNotice
@@ -93,6 +98,10 @@ fun HomeScreen(
     pendingOperations: Int,
     onSyncNow: () -> Unit,
     onOpenPost: (String) -> Unit,
+    onOpenProfile: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {},
+    openStoryRequest: Boolean = false,
+    onStoryRequestConsumed: () -> Unit = {},
     viewModel: HomeViewModel = viewModel(factory = tomateViewModelFactory { HomeViewModel(it) }),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -100,6 +109,16 @@ fun HomeScreen(
     val openStory = state.stories.firstOrNull { it.id == openStoryId }
     val context = LocalContext.current
     var postMediaError by remember { mutableStateOf<String?>(null) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Le bouton central « + » demande une story : l'écran ouvre son compositeur, une seule fois.
+    LaunchedEffect(openStoryRequest) {
+        if (openStoryRequest) {
+            viewModel.openStoryComposer()
+            onStoryRequestConsumed()
+        }
+    }
 
     // A post attachment is uploaded before the row is written; offline it is refused honestly.
     val postPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -150,14 +169,63 @@ fun HomeScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(text = "TOMATE", style = MaterialTheme.typography.headlineMedium) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    tomate.core.designsystem.components.TomateLogo(size = 34.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "TOMATE",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.5.sp,
+                    )
+                }
+            },
             actions = {
-                TomateNetworkBadge(status = network)
-                IconButton(onClick = onSyncNow) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Synchroniser maintenant")
+                IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQuery = "" }) {
+                    Icon(
+                        imageVector = if (searchOpen) Icons.Filled.Close else Icons.Filled.Search,
+                        contentDescription = if (searchOpen) "Fermer la recherche" else "Rechercher dans le fil",
+                    )
+                }
+                IconButton(onClick = onOpenNotifications) {
+                    Box(contentAlignment = Alignment.TopEnd) {
+                        Icon(Icons.Filled.NotificationsNone, contentDescription = "Notifications")
+                        if (state.unreadNotifications > 0) {
+                            Box(modifier = Modifier.padding(start = 12.dp)) {
+                                TomateCountBadge(count = state.unreadNotifications)
+                            }
+                        }
+                    }
+                }
+                IconButton(onClick = onOpenProfile) {
+                    TomateAvatar(
+                        label = state.profileLabel.ifBlank { "Moi" },
+                        size = 32,
+                    )
                 }
             },
         )
+
+        if (searchOpen) {
+            TomateTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = "Rechercher un texte ou un pseudo",
+                modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.xs),
+            )
+        }
+
+        Row(
+            modifier = Modifier.padding(horizontal = TomateSpacing.l),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TomateNetworkBadge(status = network)
+            Spacer(Modifier.width(TomateSpacing.s))
+            IconButton(onClick = onSyncNow) {
+                Icon(Icons.Filled.Refresh, contentDescription = "Synchroniser maintenant")
+            }
+        }
 
         if (state.error != null) {
             TomateInlineNotice(
@@ -283,11 +351,40 @@ fun HomeScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(TomateSpacing.m),
             ) {
-                items(state.posts, key = { it.id }) { post ->
+                val visible = if (searchQuery.isBlank()) {
+                    state.posts
+                } else {
+                    state.posts.filter { post ->
+                        post.body.contains(searchQuery, ignoreCase = true) ||
+                            post.authorHandle.contains(searchQuery, ignoreCase = true) ||
+                            post.authorDisplayName.contains(searchQuery, ignoreCase = true)
+                    }
+                }
+                if (visible.isEmpty() && searchQuery.isNotBlank()) {
+                    item {
+                        Text(
+                            text = "Aucune publication ne contient « $searchQuery ».",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(TomateSpacing.l),
+                        )
+                    }
+                }
+                items(visible, key = { it.id }) { post ->
                     PostCard(
                         post = post,
                         onOpen = { onOpenPost(post.id) },
                         onReact = { viewModel.react(post) },
+                        onEdit = if (post.authorId == state.myId) {
+                            { viewModel.startEdit(post) }
+                        } else {
+                            null
+                        },
+                        onDelete = if (post.authorId == state.myId) {
+                            { viewModel.deletePost(post) }
+                        } else {
+                            null
+                        },
                     )
                 }
             }
@@ -322,6 +419,31 @@ fun HomeScreen(
 
     state.eventDraft?.let { draft ->
         EventComposer(draft = draft, viewModel = viewModel)
+    }
+
+    val editing by viewModel.editingState().collectAsStateWithLifecycle(initialValue = null to "")
+    val (editingPost, editBody) = editing
+    if (editingPost != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelEdit,
+            title = { Text("Modifier la publication") },
+            text = {
+                TomateTextField(
+                    value = editBody,
+                    onValueChange = viewModel::onEditChange,
+                    label = "Publication",
+                    singleLine = false,
+                    minLines = 3,
+                    maxLines = 8,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmEdit) { Text("Enregistrer") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelEdit) { Text("Annuler") }
+            },
+        )
     }
 }
 
@@ -383,7 +505,7 @@ private fun EventComposer(draft: HomeViewModel.EventDraft, viewModel: HomeViewMo
 }
 
 @Composable
-private fun StoriesStrip(
+internal fun StoriesStrip(
     stories: List<Story>,
     myId: String?,
     onAdd: () -> Unit,
@@ -402,7 +524,7 @@ private fun StoriesStrip(
     ) {
         item(key = "add") {
             StoryBubble(
-                label = "Votre story",
+                label = "Ajouter une story",
                 initials = "+",
                 seen = true,
                 onClick = onAdd,
@@ -411,7 +533,8 @@ private fun StoriesStrip(
         }
         items(ordered, key = { it.id }) { story ->
             StoryBubble(
-                label = if (story.authorId == myId) "Vous" else story.authorHandle.ifBlank { "Anonyme" },
+                label = if (story.authorId == myId) "Vous"
+                else story.authorDisplayName.ifBlank { story.authorHandle.ifBlank { "Anonyme" } },
                 initials = initialsOf(story.authorDisplayName.ifBlank { story.authorHandle }),
                 seen = story.viewedByMe,
                 onClick = { onOpen(story) },
@@ -432,42 +555,68 @@ private fun StoryBubble(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(74.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .width(76.dp)
+            .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 4.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(62.dp)
-                .border(3.dp, ring, CircleShape)
-                .padding(4.dp)
-                .clip(CircleShape)
-                .background(
-                    if (add) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (add) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = "Ajouter une story",
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            } else {
-                Text(
-                    text = initials,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
+        if (add) {
+            // Tuile rose arrondie de la maquette, avec la pastille « + » rouge au centre.
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "Ajouter une story",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(3.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .border(2.dp, ring, CircleShape)
+                        .padding(3.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = initials,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
+            // Deux lignes maximum : « Ajouter une story » reste entièrement lisible.
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
