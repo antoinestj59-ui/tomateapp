@@ -36,7 +36,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platforms;android-37 build-tools;36.1.0 platform-tools'
+          packages: 'platforms;android-37.0 build-tools;36.1.0 platform-tools'
+
+      - name: Link android-37 platform
+        run: |
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -d "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
 
       - name: Unit tests (core, data, net)
         run: ./gradlew :core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest --stacktrace
