@@ -279,3 +279,27 @@ Sans cette migration, l'application refuse honnêtement l'envoi :
 
 Limites appliquées côté client : photo compressée à 1440 px (12 Mo avant compression), vidéo
 25 Mo, message vocal 10 Mo. Le bucket applique 25 Mo pour tous les types.
+
+## Migration 0011 — clés publiques de chiffrement (0.5.0)
+
+À exécuter **après** `0010`, dans l'éditeur SQL du dashboard :
+
+```sql
+-- supabase/migrations/0011_e2ee.sql
+alter table public.profiles
+    add column if not exists e2ee_agree_key text
+        check (e2ee_agree_key is null or char_length(e2ee_agree_key) between 80 and 120);
+alter table public.profiles
+    add column if not exists e2ee_sign_key text
+        check (e2ee_sign_key is null or char_length(e2ee_sign_key) between 80 and 120);
+```
+
+Puis vérifier en réel :
+
+```bash
+./tooling/verify_050_e2ee.sh   # 12 contrôles ; 5 échouent tant que 0011 n'est pas appliquée
+```
+
+Sans cette migration, l'appairage (QR/lien/NFC) et le chiffrement fonctionnent quand même entre
+deux personnes qui se sont appairées : seule la découverte automatique des clés par l'annuaire est
+indisponible.

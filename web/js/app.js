@@ -26,6 +26,15 @@ import {
 } from './db.js';
 import { enqueue, flushQueue, pendingCount } from './queue.js';
 import {
+  decryptMessage,
+  encryptMessage,
+  ensureIdentity,
+  isEncrypted,
+  loadPeerKeys,
+  pairingLink,
+  savePeerKeys,
+} from './e2ee.js';
+import {
   cachedWeather,
   describeCode,
   fetchWeather,
@@ -109,6 +118,9 @@ const S = {
   turnBusy: false,
   call: null,
   callWatch: null,
+  replyTo: null,
+  chatSearch: '',
+  messageReactions: {},
 };
 
 const ONLINE = () => navigator.onLine;
@@ -352,6 +364,7 @@ const ICON = {
   heart: svg('<path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8Z"/>'),
   comment: svg('<path d="M21 11.5A7.5 7.5 0 0 1 13.5 19H8l-5 3v-7.5A7.5 7.5 0 0 1 10.5 7h3A7.5 7.5 0 0 1 21 11.5Z"/>'),
   send: svg('<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/>'),
+  share: svg('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6 15.4 6.4M8.6 13.4l6.8 4.2"/>'),
   trash: svg('<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/>'),
   refresh: svg('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>'),
   settings: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>'),
@@ -610,7 +623,10 @@ function postItem(post) {
         <button class="action" data-act="open-post" data-id="${esc(post.id)}">
           ${ICON.comment}<span>${post.comment_count ?? 0}</span>
         </button>
-        ${mine ? `<button class="action" data-act="delete-post" data-id="${esc(post.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
+        <button class="action" data-act="share-post" data-id="${esc(post.id)}" aria-label="Partager">
+          ${ICON.share ?? ICON.send}<span>Partager</span>
+        </button>
+        ${mine ? `<button class="action" data-act="edit-post" data-id="${esc(post.id)}" aria-label="Modifier">✏️</button><button class="action" data-act="delete-post" data-id="${esc(post.id)}" aria-label="Supprimer">${ICON.trash}</button>` : ''}
       </div>
     </div>
   </article>`;
@@ -1130,6 +1146,83 @@ async function deletePost(id) {
   await syncNow();
 }
 
+async function editPost(id) {
+  const post = S.feed.find((p) => p.id === id);
+  if (!post) return toast('Publication introuvable.');
+  if (post.author_id !== S.profile?.id) return toast("Seul l'auteur peut modifier cette publication.");
+  const next = await promptDialog({ title: 'Modifier la publication', label: 'Publication', placeholder: post.body });
+  if (next === null) return;
+  const body = next.trim().slice(0, 2000);
+  if (!body) return toast('Le message est vide.');
+  post.body = body;
+  await cacheSet('feed', S.feed);
+  await enqueue('post_update', { id, body });
+  render();
+  await syncNow();
+  toast('Publication modifiée.');
+}
+
+async function toggleMessageReaction(messageId, emoji) {
+  const fallback = emoji || '🍅';
+  try {
+    await ensureRemoteSession();
+    const mine = S.messageReactions?.[messageId]?.[fallback] > 0;
+    if (mine) {
+      await rest('message_reactions', {
+        method: 'DELETE',
+        query: `message_id=eq.${messageId}&user_id=eq.${S.profile.id}&emoji=eq.${encodeURIComponent(fallback)}`,
+      });
+    } else {
+      await rest('message_reactions', {
+        method: 'POST',
+        prefer: 'return=minimal,resolution=ignore-duplicates',
+        onConflict: 'message_id,user_id,emoji',
+        body: { message_id: messageId, user_id: S.profile.id, emoji: fallback },
+      });
+    }
+    await loadMessageReactions(S.param);
+  } catch (error) {
+    const text = humanError(error);
+    if (/0010|message_reactions|schema/i.test(text)) {
+      toast("Réactions non activées : appliquez la migration 0010_message_reactions.sql.");
+    } else {
+      await enqueue('message_reaction_add', { message_id: messageId, user_id: S.profile.id, emoji: fallback });
+      toast(text);
+    }
+  }
+  render();
+}
+
+async function loadMessageReactions(conversationId) {
+  try {
+    const messages = S.messages.filter((m) => m.conversation_id === conversationId || !m.conversation_id);
+    if (messages.length === 0) { S.messageReactions = {}; return; }
+    const ids = messages.map((m) => m.id).join(',');
+    const rows = await rest('message_reactions', { query: `select=message_id,emoji&message_id=in.(${ids})` });
+    const tally = {};
+    for (const row of rows) {
+      tally[row.message_id] = tally[row.message_id] || {};
+      tally[row.message_id][row.emoji] = (tally[row.message_id][row.emoji] || 0) + 1;
+    }
+    S.messageReactions = tally;
+  } catch {
+    S.messageReactions = S.messageReactions || {};
+  }
+}
+
+async function renameConversation(id) {
+  const conversation = S.conversations.find((c) => c.id === id);
+  const next = await promptDialog({ title: 'Renommer le groupe', label: 'Nom du groupe', placeholder: conversation?.title || 'Groupe' });
+  if (next === null) return;
+  const title = next.trim().slice(0, 80);
+  if (!title) return toast('Le titre est vide.');
+  if (conversation) conversation.title = title;
+  await cacheSet('conversations', S.conversations);
+  await enqueue('conversation_rename', { conversation_id: id, title });
+  render();
+  await syncNow();
+}
+
 async function toggleLike(post) {
   post.reacted_by_me = !post.reacted_by_me;
   post.reaction_count = Math.max(0, (post.reaction_count ?? 0) + (post.reacted_by_me ? 1 : -1));
@@ -1277,6 +1370,8 @@ function chatView() {
   const conversation = S.conversations.find((c) => c.id === S.param);
   return shell(`
     ${S.lastError ? notice(S.lastError, 'error', true) : ''}
+    <div class="card" style="padding:10px 14px"><input class="input" data-chat-search placeholder="Rechercher dans la conversation…" value="${esc(S.chatSearch || '')}" aria-label="Rechercher dans la conversation" /></div>
+    ${S.replyTo ? `<div class="card reply-banner"><span>Réponse : ${esc((S.messages.find((m) => m.id === S.replyTo)?.body || '').slice(0, 100))}</span><button class="icon-btn" data-act="msg-reply-cancel" aria-label="Annuler la réponse">✕</button></div>` : ''}
     <div class="card" style="min-height:40vh;display:flex;flex-direction:column;gap:8px;padding:14px">
       ${visibleMessages().length === 0 ? emptyState('💬', 'Aucun message.', 'Écrivez le premier message.') : visibleMessages().map(messageItem).join('')}
     </div>
@@ -1413,14 +1508,34 @@ function chatMediaPreview() {
   </div>`;
 }
 
+/**
+ * Texte affichable d'un message : le clair si on l'a, sinon un avertissement honnête — jamais du
+ * base64 présenté comme un message.
+ */
+function messageTextHtml(message) {
+  if (message.plain) return `<div style="white-space:pre-wrap">${esc(message.plain)}</div>`;
+  if (isEncrypted(message.body)) {
+    return message.undecryptable
+      ? '<div class="tiny" style="opacity:.85">🔒 Message chiffré — la clé de ce contact manque sur cet appareil.</div>'
+      : '<div class="tiny" style="opacity:.85">🔒 Déchiffrement…</div>';
+  }
+  return message.body ? `<div style="white-space:pre-wrap">${esc(message.body)}</div>` : '';
+}
+
 function messageItem(message) {
   const poll = decodePoll(message.body);
   if (poll) return pollBubble(message, poll);
   const mine = message.sender_id === S.profile?.id;
-  return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:16px">
+  const quoted = message.reply_to_id ? S.messages.find((m) => m.id === message.reply_to_id)?.body?.slice(0, 120) : null;
+  const tally = (S.messageReactions && S.messageReactions[message.id]) || {};
+  const chips = Object.entries(tally).map(([emoji, count]) => `<button class="chip" data-act="msg-react" data-id="${esc(message.id)}" data-emoji="${esc(emoji)}">${esc(emoji)} ${count}</button>`).join('');
+  return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:85%;background:${mine ? 'var(--primary)' : 'var(--surface-2)'};color:${mine ? 'var(--on-primary)' : 'var(--text)'};padding:9px 13px;border-radius:18px">
+    ${quoted ? `<div class="quote">${esc(quoted)}</div>` : ''}
     ${messageMediaHtml(message)}
-    ${message.body ? `<div style="white-space:pre-wrap">${esc(message.body)}</div>` : ''}
-    <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
+    ${messageTextHtml(message)}
+    <div class="tiny" style="opacity:.75;margin-top:3px">${fmtDate(message.created_at)}${isEncrypted(message.body) ? ' · 🔒 chiffré' : ' · non chiffré'}${message.pending ? ' · en attente' : message.failed ? ' · non envoyé' : ''}</div>
+    <div class="msg-tools"><button class="link" data-act="msg-reply" data-id="${esc(message.id)}">Répondre</button><span class="react-quick">${['🍅', '❤️', '👍'].map((e) => `<button class="link" data-act="msg-react" data-id="${esc(message.id)}" data-emoji="${e}">${e}</button>`).join('')}</span></div>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}
   </div>`;
 }
 
@@ -1469,6 +1584,8 @@ async function loadMessages(conversationId) {
   const key = `messages:${conversationId}`;
   const cached = await cacheGet(key);
   S.messages = Array.isArray(cached) ? cached : [];
+  // Le cache ne contient que du chiffré : on redéchiffre avec les clés locales, même hors ligne.
+  await decryptMessages(conversationId, S.messages);
   if (!ONLINE()) return;
   try {
     await ensureRemoteSession();
@@ -1478,8 +1595,10 @@ async function loadMessages(conversationId) {
     // Keep local-only messages, including refused ones: the user's text must not vanish silently.
     const local = S.messages.filter((m) => m.pending || m.failed);
     S.messages = [...rows, ...local.filter((m) => !rows.some((r) => r.id === m.id))];
-    await cacheSet(key, S.messages);
+    await decryptMessages(conversationId, S.messages);
+    await cacheSet(key, cacheableMessages(S.messages));
     await resolveChatMedia(S.messages);
+    await loadMessageReactions(conversationId);
   } catch {
     // Cached messages stay readable.
   }
@@ -1503,12 +1622,41 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     }
   }
 
+  // Chiffrement 1-1 avant toute écriture : le cache, la file et le serveur ne voient que du
+  // chiffré. En groupe, ou sans clé du contact, le message part en clair et l'interface l'affiche.
+  const conversation = S.conversations.find((c) => c.id === conversationId);
+  const peerId = conversation?.peer_id ?? null;
+  let wireBody = text;
+  let sealed = false;
+  if (text && peerId && !conversation?.is_group) {
+    const peer = loadPeerKeys(peerId) || (await fetchPeerKeys(peerId));
+    if (peer) {
+      try {
+        const identity = await ensureIdentity(S.profile.id);
+        wireBody = await encryptMessage({
+          plaintext: text,
+          conversationId,
+          senderId: S.profile.id,
+          recipientAgreeKey: peer.agreeKey,
+          senderSignPrivate: identity.signPrivate,
+        });
+        sealed = true;
+      } catch (error) {
+        toast('Message trop long pour être chiffré : il part en clair.');
+      }
+    }
+  }
+
+  const replyTo = S.replyTo || null;
   const message = {
     id: crypto.randomUUID(),
     client_id: crypto.randomUUID(),
     conversation_id: conversationId,
+    reply_to_id: replyTo,
     sender_id: S.profile.id,
-    body: text,
+    body: wireBody,
+    plain: text,
+    encrypted: sealed,
     media_path: attachment?.path ?? null,
     media_kind: attachment?.kind ?? null,
     media_mime: attachment?.mime ?? null,
@@ -1517,15 +1665,16 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
     pending: true,
   };
   S.messages = [...S.messages, message];
-  await cacheSet(`messages:${conversationId}`, S.messages);
+  await cacheSet(`messages:${conversationId}`, cacheableMessages(S.messages));
   // Only server columns go on the wire: local state (`pending`) is not a database column.
   await enqueue('message_send', {
     id: message.id,
     client_id: message.client_id,
     conversation_id: conversationId,
     sender_id: message.sender_id,
-    body: text,
-    encrypted: false,
+    body: wireBody,
+    encrypted: sealed,
+    ...(replyTo ? { reply_to_id: replyTo } : {}),
     ...(attachment
       ? {
         media_path: attachment.path,
@@ -1537,6 +1686,7 @@ async function sendMessage(conversationId, body, media = S.chatMedia) {
   });
   if (S.chatMedia?.preview) URL.revokeObjectURL(S.chatMedia.preview);
   S.chatMedia = null;
+  S.replyTo = null;
   await resolveChatMedia([message]);
   render();
   await syncNow();
@@ -1588,19 +1738,29 @@ async function newConversation() {
 const FRIEND_SCHEME = 'tomato://add';
 
 function friendPayload() {
+  // Le QR transporte l'identité ET les clés publiques de chiffrement : c'est ce qui permet de
+  // vérifier les clés hors bande au lieu de faire confiance au serveur.
+  const identity = S.e2eeIdentity;
   const params = new URLSearchParams({
+    v: '1',
     u: S.profile.id,
+    n: S.profile.handle ?? '',
     h: S.profile.handle ?? '',
-    n: S.profile.display_name ?? '',
   });
-  return `${FRIEND_SCHEME}?${params.toString()}`;
+  if (identity) {
+    params.set('a', identity.agreeKey);
+    params.set('s', identity.signKey);
+  }
+  return `tomate://pair?${params.toString()}`;
 }
 
 /** Accepts a tomato:// payload, a pasted link, or an https URL carrying the same query. */
 function parseFriendPayload(raw) {
   const text = String(raw ?? '').trim();
   if (!text) return null;
-  const normalised = text.replace(/^tomato:\/\//i, 'https://tomate.local/');
+  const normalised = text
+    .replace(/^tomato:\/\//i, 'https://tomate.local/')
+    .replace(/^tomate:\/\//i, 'https://tomate.local/');
   let url;
   try {
     url = new URL(normalised);
@@ -1611,15 +1771,71 @@ function parseFriendPayload(raw) {
   if (!id || !/^[A-Za-z0-9-]{3,64}$/.test(id)) return null;
   return {
     id,
-    handle: (url.searchParams.get('h') ?? '').replace(/^@/, '').slice(0, 20),
+    handle: (url.searchParams.get('n') ?? url.searchParams.get('h') ?? '').replace(/^@/, '').slice(0, 20),
     name: (url.searchParams.get('n') ?? '').slice(0, 40),
+    agreeKey: url.searchParams.get('a') ?? null,
+    signKey: url.searchParams.get('s') ?? null,
   };
+}
+
+/** Clés publiques d'un contact lues dans l'annuaire (migration 0011), si l'appairage manque. */
+async function fetchPeerKeys(userId) {
+  if (!userId || !ONLINE()) return null;
+  try {
+    await ensureRemoteSession();
+    const rows = await rest('profiles', {
+      query: `select=id,handle,e2ee_agree_key,e2ee_sign_key&id=eq.${userId}`,
+    });
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row?.e2ee_agree_key || !row?.e2ee_sign_key) return null;
+    savePeerKeys(userId, row.handle, row.e2ee_agree_key, row.e2ee_sign_key, 'directory');
+    return loadPeerKeys(userId);
+  } catch {
+    return null;
+  }
+}
+
+/** Déchiffre ce qui doit l'être, sans jamais afficher de base64 à l'utilisateur. */
+async function decryptMessages(conversationId, list) {
+  if (!S.profile) return;
+  const identity = await ensureIdentity(S.profile.id).catch(() => null);
+  if (!identity) return;
+  for (const message of list) {
+    if (!isEncrypted(message.body) || message.plain) continue;
+    try {
+      const senderKeys = message.sender_id === S.profile.id
+        ? { agreeKey: identity.agreeKey, signKey: identity.signKey }
+        : (loadPeerKeys(message.sender_id) || (await fetchPeerKeys(message.sender_id)));
+      if (!senderKeys?.signKey) {
+        message.undecryptable = true;
+        continue;
+      }
+      message.plain = await decryptMessage({
+        body: message.body,
+        conversationId,
+        expectedSenderId: message.sender_id,
+        recipientAgreePrivate: identity.agreePrivate,
+        senderSignPublic: senderKeys.signKey,
+      });
+      message.encrypted = true;
+    } catch {
+      message.undecryptable = true;
+    }
+  }
+}
+
+/** Le cache local ne garde que le corps chiffré : le texte clair reste en mémoire. */
+function cacheableMessages(list) {
+  return list.map(({ plain, ...rest }) => rest);
 }
 
 async function addFriendFromText(raw) {
   const peer = parseFriendPayload(raw);
   if (!peer) return toast('Ce code ne contient pas une invitation TOMATE.');
   if (peer.id === S.profile.id) return toast("C'est votre propre code.");
+  if (peer.agreeKey && peer.signKey) {
+    savePeerKeys(peer.id, peer.handle, peer.agreeKey, peer.signKey, 'pairing');
+  }
   await createConversationWith(peer);
   toast(`Conversation avec @${peer.handle || peer.name || 'ce compte'} prête.`);
 }
@@ -1717,6 +1933,9 @@ async function scanFriendCode(dialog) {
 }
 
 async function createConversationWith(peer) {
+  if (peer.agreeKey && peer.signKey) {
+    savePeerKeys(peer.id, peer.handle, peer.agreeKey, peer.signKey, 'pairing');
+  }
   const existing = S.conversations.find((c) => c.peer_id === peer.id);
   if (existing) {
     location.hash = `#/chat/${existing.id}`;
@@ -3083,6 +3302,19 @@ document.addEventListener('click', async (event) => {
       case 'open-post':
         location.hash = `#/post/${trigger.dataset.id}`;
         break;
+      case 'share-post': {
+        const shared = S.feed.find((p) => p.id === trigger.dataset.id);
+        if (shared) {
+          const text = (shared.body || 'Publication TOMATE').slice(0, 280);
+          if (navigator.share) {
+            await navigator.share({ title: 'TOMATE', text }).catch(() => {});
+          } else {
+            await navigator.clipboard?.writeText(text).catch(() => {});
+            toast('Publication copiée.');
+          }
+        }
+        break;
+      }
       case 'open-chat':
         location.hash = `#/chat/${trigger.dataset.id}`;
         break;
@@ -3096,6 +3328,23 @@ document.addEventListener('click', async (event) => {
       }
       case 'delete-post':
         await deletePost(trigger.dataset.id);
+        break;
+      case 'edit-post':
+        await editPost(trigger.dataset.id);
+        break;
+      case 'msg-reply':
+        S.replyTo = trigger.dataset.id;
+        render();
+        break;
+      case 'msg-reply-cancel':
+        S.replyTo = null;
+        render();
+        break;
+      case 'msg-react':
+        await toggleMessageReaction(trigger.dataset.id, trigger.dataset.emoji);
+        break;
+      case 'rename-chat':
+        await renameConversation(trigger.dataset.id);
         break;
       case 'new-conversation':
         await newConversation();
@@ -3197,6 +3446,15 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('input', (event) => {
+  const chatSearch = event.target.closest('[data-chat-search]');
+  if (chatSearch) {
+    S.chatSearch = chatSearch.value.slice(0, 80);
+    const list = document.querySelector('.card');
+    render();
+    const back = document.querySelector('[data-chat-search]');
+    if (back) { back.focus(); back.setSelectionRange(back.value.length, back.value.length); }
+    return;
+  }
   const field = event.target;
   if (!field.matches('textarea[maxlength]')) return;
   const form = field.closest('form');
@@ -3388,6 +3646,13 @@ async function boot() {
     if (!S.profile) S.route = 'welcome';
     await navigate();
     if (navigator.onLine) await syncNow({ silent: true });
+    if (S.profile) {
+      try {
+        S.e2eeIdentity = await ensureIdentity(S.profile.id);
+      } catch (error) {
+        S.lastError = humanError(error);
+      }
+    }
     if (S.profile) await loadNotifications();
   }
 }
@@ -3432,7 +3697,10 @@ function isSignalMessage(body) {
 }
 
 function visibleMessages() {
-  return S.messages.filter((m) => !isVote(m.body) && !isSignalMessage(m.body));
+  const query = (S.chatSearch || '').trim().toLowerCase();
+  return S.messages
+    .filter((m) => !isVote(m.body) && !isSignalMessage(m.body))
+    .filter((m) => !query || (m.body || '').toLowerCase().includes(query));
 }
 
 function pollDialog() {

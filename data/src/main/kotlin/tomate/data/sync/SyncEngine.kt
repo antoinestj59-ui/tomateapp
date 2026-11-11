@@ -110,6 +110,7 @@ class SyncEngine(
         "post_insert" -> api.insert(
             "posts", entry.payload, ignoreDuplicates = true, onConflict = "id",
         ).toUnit()
+        "post_update" -> api.update("posts", listOf("id" to "eq.${idFromPayload(entry.payload)}"), entry.payload).toUnit()
         "post_delete" -> api.delete("posts", listOf("id" to "eq.${idFromPayload(entry.payload)}")).toUnit()
         "comment_insert" -> api.insert(
             "post_comments", entry.payload, ignoreDuplicates = true, onConflict = "id",
@@ -180,6 +181,19 @@ class SyncEngine(
         "message_send" -> api.insert(
             "messages", entry.payload, ignoreDuplicates = true, onConflict = "id",
         ).toUnit()
+        "conversation_rename" -> renameConversation(entry.payload).toUnit()
+        "message_reaction_add" -> api.insert(
+            "message_reactions", entry.payload, ignoreDuplicates = true,
+            onConflict = "message_id,user_id,emoji",
+        ).toUnit()
+        "message_reaction_remove" -> api.delete(
+            "message_reactions",
+            listOf(
+                "message_id" to "eq.${fieldFromPayload(entry.payload, "message_id")}",
+                "user_id" to "eq.${fieldFromPayload(entry.payload, "user_id")}",
+                "emoji" to "eq.${fieldFromPayload(entry.payload, "emoji")}",
+            ),
+        ).toUnit()
         "report_create" -> api.insert(
             "reports", entry.payload, ignoreDuplicates = true, onConflict = "id",
         ).toUnit()
@@ -219,6 +233,22 @@ class SyncEngine(
                 ).toUnit()
             }
         }
+    }
+
+    private suspend fun renameConversation(payload: String): Outcome<String> {
+        val element = runCatching { SupabaseApi.json.parseToJsonElement(payload) }.getOrNull()
+        val obj = element as? kotlinx.serialization.json.JsonObject
+            ?: return Outcome.Failure(AppError.Validation("member_payload", "Conversation à renommer incomplète."))
+        val conversationId = obj["conversation_id"]?.toString()?.trim('"').orEmpty()
+        val title = obj["title"]?.toString()?.trim('"').orEmpty()
+        if (conversationId.isBlank() || title.isBlank()) {
+            return Outcome.Failure(AppError.Validation("member_payload", "Conversation à renommer incomplète."))
+        }
+        val body = SupabaseApi.json.encodeToString(
+            kotlinx.serialization.json.JsonObject.serializer(),
+            kotlinx.serialization.json.buildJsonObject { put("title", kotlinx.serialization.json.JsonPrimitive(title)) },
+        )
+        return api.update("conversations", listOf("id" to "eq.$conversationId"), body)
     }
 
     private fun <T> Outcome<T>.toUnit(): Outcome<Unit> = when (this) {

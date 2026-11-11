@@ -1,7 +1,8 @@
-# STATUS — TOMATE 0.3.0
+# STATUS — TOMATE 0.5.0
 
-Dernière vérification : **10 novembre 2026** (VM Linux, JDK 21, Gradle 9.9.0, AGP 9.5.1) et
-navigateur cloud Chromium pour la PWA.
+Dernière vérification : **10 novembre 2026** (bac à sable cloud, JDK Temurin 21.0.13, Gradle 9.9.0, AGP 9.5.1, Node 26.13.0).
+
+Itération en cours : **0.5.0 — chiffrement de bout en bout, appairage QR/NFC/lien, maillage inspiré de bitchat**.
 
 Ce fichier décrit **uniquement ce qui a été exécuté**. Le non-testé est déclaré comme tel.
 
@@ -471,3 +472,185 @@ Publication `49deae70-1bbe-4310-a0bb-ed374c99658c` (« Apéro TOMATE ») :
   « opération(s) refusée(s) » avec leur raison : **Réessayer** les rejoue maintenant sans doublon,
   **Abandonner** les efface. Si elles échouent encore, la raison exacte sera affichée à l'écran.
 - Toujours non appliquées par le propriétaire : `0007`, `0008`, `0009` (pas de clé `service_role`).
+
+## 2 duodecies. Itération 0.4.0 — refonte expressive, réponses, réactions, édition (10 novembre 2026)
+
+Branche : `tomate/mission-refonte-produit`.
+
+### Refonte graphique (code réel, pas une maquette)
+
+| Élément | Fichier | État |
+|---|---|---|
+| Palette expressive (conteneurs `surfaceContainer*`, primaire tomate recalibré, statuts conservés) | `core/.../theme/Color.kt` | compilé |
+| Logo tomate vectoriel (Canvas, sans dépendance d'image) + avatars de repli | `core/.../components/TomateLogo.kt` (nouveau) | compilé |
+| Navigation expressive : icônes remplies/contours selon la sélection | `TomateDestination.kt`, `TomateApp.kt` | compilé |
+| Cartes expressives : `PostCard`, `ConversationRow` en `surfaceContainer` + `extraLarge`, hiérarchie resserrée | `SharedComponents.kt` | compilé |
+| Bulles expressives : asymétriques, citation de réponse, état de livraison honnête | `SharedComponents.kt` | compilé |
+| Logo dans la barre d'accueil | `HomeScreen.kt` | compilé |
+| PWA : mêmes formes/couleurs, nouveaux styles citation/outils/chips/bandeau de réponse | `web/css/app.css` | `node --check` OK |
+
+### Fonctionnel (sans migration pour l'existant, fondation + repli honnête pour le reste)
+
+| Fonction | Base servie | État |
+|---|---|---|
+| Répondre à un message (citation affichée, `reply_to_id` envoyé) | colonnes existantes | Android + PWA, file idempotente |
+| Recherche locale dans la conversation | aucune (filtre local) | Android + PWA |
+| Modifier une publication (+ détail) | `posts_update_author` existante | Android + PWA (`post_update` rejouée par les deux files) |
+| Renommer un groupe | `conversations_update_member` existante | Android + PWA (`conversation_rename` rejouée) |
+| Réactions aux messages (🍅 ❤️ 👍…) | **migration `0010_message_reactions.sql` à appliquer** | code livré, repli explicite « Réactions non activées : appliquez la migration 0010… » tant qu'elle manque, file `message_reaction_add/remove` prête |
+| `ALL_IN_ONE.sql` inclut désormais `0007`→`0010` (en-tête corrigé) | — | fichier à jour |
+
+### Vérifications réellement exécutées
+
+| Test | Résultat |
+|---|---|
+| `:core` + `:data` + `:net` + `:app` (tests unitaires JVM) | **57 tests, 0 échec, 0 erreur** (dont `SyncEngineTest` passé de 8 à 11 : `post_update`, `conversation_rename`, `message_reaction_add`) |
+| `:app:testDebugUnitTest` (dont `UiScreenshotTest` Robolectric) | **BUILD SUCCESSFUL** |
+| `:app:assembleDebug` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.4.0-debug.apk` (71 Mo, `versionCode 14`) |
+| `node --check web/js/app.js web/js/queue.js` | OK |
+
+### Limites de cette itération (déclarées, pas simulées)
+
+- **Aucun appareil ni émulateur** : l'APK 0.4.0 est compilé, pas exécuté sur téléphone ; les écrans
+  réécrits (bulles, cartes, dialogue d'édition) ne sont pas vérifiés visuellement ici.
+- Les **réactions aux messages** exigent la migration `0010` : sans elle, l'app l'annonce au lieu
+  d'inventer un état.
+- La PWA n'a pas été rejouée contre le serveur ici (aucune clé dans cet environnement) : les
+  nouveaux chemins (`post_update`, `conversation_rename`, `message_reactions`) suivent les mêmes
+  conventions que les chemins déjà vérifiés (`Prefer`, `on_conflict`, file rejouable).
+- Toujours non entamé : E2EE réel, relais A→B→C sur trois téléphones, modération administrateur,
+  assistant, appels de groupe.
+
+### Rejeu réel contre le serveur (nuit du 10 novembre 2026, `tooling/verify_040_reactions.sh`)
+
+Après application de `0010` par le propriétaire, rejoué en HTTP réel avec deux comptes
+anonymes frais (clé publique uniquement, aucune donnée conservée) : **25 PASS / 26**.
+
+| Chemin vérifié | Résultat réel |
+|---|---|
+| `0010` appliquée (`GET message_reactions` → 200, pas `PGRST205`) | PASS |
+| Création profils A/B, conversation (201, membre auto via trigger), relecture | PASS |
+| Renommage (`PATCH conversations` + relecture du nouveau titre) | PASS |
+| Message + réponse (`reply_to_id` relu à l'identique) | PASS |
+| Réaction 🍅 (201, relecture 1 ligne), doublon **409** (pas de doublon) | PASS |
+| Non-membre : ajout **403**, lecture `[]` (RLS membre confirmée) | PASS |
+| Retrait réaction (204, relecture `[]`) | PASS |
+| Édition publication (`PATCH posts` + relecture, puis suppression réelle) | PASS |
+| Suppression conversation + cascade | **FAIL — voir ci-dessous** |
+| Nettoyage (profils A/B supprimés, cascade serveur vérifiée) | PASS |
+
+Deux constats honnêtes, reproduits chacun 3 fois minimum :
+
+1. **`POST /conversations` avec `Prefer: return=representation` → 403 (`42501`) sans créer
+   la ligne, alors que la même requête avec `return=minimal` → 201.** Les deux clients
+   (Android `representation = false`, PWA `prefer: 'return=minimal'`) utilisent déjà la forme
+   qui marche : aucun code applicatif n'est touché. Le script de vérification suit désormais
+   exactement le chemin des clients (écriture minimale + `GET` séparé). Cause PostgREST exacte
+   non établie ; effet 100 % reproductible, documenté dans le script.
+2. **`DELETE /conversations` (politique `conversations_delete_creator`, migration `0008`)
+   ne correspond à aucune ligne** : 204/200 avec `[]`, la conversation et ses messages restent.
+   `created_by` stocké = `auth.uid()` vérifié par relecture : c'est la politique `0008` qui
+   manque côté serveur (le propriétaire n'avait appliqué que `0010`). Conséquence : la
+   suppression de conversation de l'app croit réussir (204) sans rien effacer — **en attente
+   d'application de `0007`/`0008`/`0009`, toujours dues depuis 0.3.1.** Dès `0008` appliquée,
+   relancer `./tooling/verify_040_reactions.sh` (attendu : 26/26).
+
+## 3. Itération 0.4.0-visuel — interface alignée sur les maquettes (10 novembre 2026)
+
+Migrations `0007` → `0010` appliquées par le propriétaire : le script de rejeu réel
+`tooling/verify_040_reactions.sh` passe **26 PASS / 0 FAIL** (réponses citées, renommage,
+réactions + RLS non-membre, édition de publication, suppression de conversation avec cascade).
+Le chemin de notifications a été vérifié séparément : message A→B ⇒ notification `message`
+créée par le déclencheur serveur, lue par B (200), `PATCH read_at` (204), relue.
+
+### Ce qui a été refait pour ressembler aux maquettes
+
+| Zone | Avant | Maintenant |
+|---|---|---|
+| Barre de navigation | `NavigationBar` Material standard, 5 onglets | barre expressive maison : 4 onglets, pilule colorée sous l'onglet actif, **bouton central « + »** qui ouvre une feuille d'actions réelles (story, conversation, communauté, proximité), badge rouge de messages non lus |
+| Accueil — en-tête | logo + badge réseau + actualiser | logo + **TOMATE** en gras, **recherche locale** dans le fil, **cloche avec compteur réel** de notifications, **avatar** vers le profil, badge réseau conservé |
+| Accueil — stories | pastilles rondes, libellé = pseudo | tuile rose arrondie « + », avatars cerclés (gris = vue), libellé = nom affiché, deux lignes maximum |
+| Accueil — publication | carte tonale, date `dd/MM HH:mm`, portée en pastille texte, « Modifier » en chip | carte blanche, **« il y a 12 min »**, **icône de portée** (globe/personnes/cadenas), média **plein cadre**, rangée ❤️/💬/Partager (partage système réel), menu ⋯ **Modifier / Supprimer** |
+| Messages | barre simple, cartes empilées, date complète | titre + composeur rouge, **filtres Toutes / Privées / Groupes / Non lues**, lignes plates avatar+nom+aperçu+heure+badge rouge, FAB |
+| Communautés | liste de cartes | **bandeau dégradé TOMATE**, « Vos communautés », « Découvrir » en carrousel, pastilles d'icônes |
+| Profil | cartes empilées (chiffrement, récupération, blocages) | en-tête centré (anneau, crayon), nom + @pseudo + bio, bouton **Modifier le profil** + partage, **statistiques réelles** (publications, communautés, bloqués), menu à chevrons (Paramètres, Notifications, Confidentialité, Code de récupération, Chiffrement), **Se déconnecter** en pilule rouge. Toutes les fonctions précédentes restent accessibles (récupération, blocages, E2EE, identifiant, file d'attente) |
+| Détail communauté | barre de titre + carte | **bannière**, logo superposé, adhésion, **onglets Publications / Membres / À propos**, membres lus sur le serveur |
+| Notifications | inexistant | **écran réel** lisant `notifications` (0007), marquage lu / tout lu, navigation vers la conversation ou la publication |
+| PWA | pas de partage | action **Partager** (Web Share, repli presse-papiers) ; temps relatifs et médias arrondis déjà en place |
+
+### Ce qui est vérifié, et comment
+
+| Vérification | Résultat |
+|---|---|
+| `:core` `:data` `:net` `:app` tests JVM | **BUILD SUCCESSFUL**, 0 échec |
+| `UiScreenshotTest` (4 rendus Robolectric 360 dp) | navigation, stories, carte de publication, composeur : **PNG produits puis regardés** (`app/build/ui-screenshots/`) |
+| `:app:assembleDebug --rerun-tasks` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.4.0-debug.apk` |
+| `node --check web/js/app.js web/js/queue.js` | OK ; **aucune action `data-act` sans gestionnaire** (audit automatique) |
+| Rejeu HTTP réel (`verify_040_reactions.sh`) | **26/26** |
+| Notifications A→B en HTTP réel | notification créée par le serveur, lue, marquée lue |
+
+### Limites (inchangées ou nouvelles, déclarées telles quelles)
+
+- **Toujours aucun appareil ni émulateur** : les écrans sont compilés et quatre zones sont
+  rendues en pixels et regardées, mais l'app complète n'a pas été parcourue à la main.
+- La **PWA garde 5 onglets** (dont « Réseau ») sans bouton central : la refonte de sa barre
+  n'a pas été faite, seules les actions de partage et les temps relatifs sont alignés.
+- **Pas d'avatars photo, pas de badge « vérifié », pas de compteurs d'abonnés** : aucune de ces
+  données n'existe côté client (aucune table `follows` interrogée). Les afficher serait inventer.
+- Le bouton central ouvre les actions existantes ; il ne crée pas de « publication rapide »
+  modale : la rédaction reste dans l'accueil.
+- Toujours non faits : E2EE réel, relais A→B→C sur trois téléphones, modération administrateur,
+  assistant, appels de groupe.
+
+## 9. Itération 0.5.0 — chiffrement de bout en bout, appairage, maillage
+
+Dernière vérification : **10 novembre 2026**.
+
+### Ce qui a été exécuté
+
+| Vérification | Résultat |
+|---|---|
+| `:core` `:data` `:net` `:app` — tests JVM `--rerun-tasks` | **BUILD SUCCESSFUL**, **108 tests, 0 échec, 0 ignoré** (core 19, data 50, net 31, app 8) |
+| `:app:assembleDebug --rerun-tasks` | **BUILD SUCCESSFUL** — `artifacts/tomate-0.5.0-debug.apk`, `versionCode 16`, 0.5.0 |
+| Interopérabilité Android ↔ PWA | **exécutée** : `E2eeInteropTest` lance Node sur le vrai `web/js/e2ee.js` — la PWA déchiffre un message Kotlin, vérifie sa signature, renvoie une réponse que Kotlin déchiffre ; numéros de sécurité identiques |
+| Vecteur RFC 5869 (HKDF) | **octet pour octet** |
+| Appairage QR | **QR réel en pixels** (640×640, modules noirs et blancs comptés) |
+| Appairage NFC | **aller-retour NDEF** : le lien relu contient les mêmes clés |
+| Rejeu HTTP réel (`verify_050_e2ee.sh`) | **9 PASS / 5 FAIL** — les 5 échecs sont tous dus à la **migration 0011 non appliquée** (colonnes de l'annuaire absentes) |
+| Dont : le serveur ne stocke que du chiffré | **vérifié en HTTP réel** : message chiffré `201`, relu par le destinataire **octet pour octet**, `encrypted = true` en base, texte clair **absent** de la base |
+| `node --check web/js/app.js web/js/e2ee.js` | OK |
+
+### Ce que l'itération change vraiment
+
+- **E2EE réel 1-1** : ECDH P-256 + HKDF-SHA256 + AES-256-GCM, clé éphémère par message, signature
+  ECDSA de l'émetteur, AAD liant conversation/émetteur/clé. Le corps stocké dans `messages.body`
+  est le chiffré : Room, l'outbox, le cache PWA et Supabase ne voient que du chiffré.
+- **Un seul format, deux clients** : `core/crypto/E2ee.kt` et `web/js/e2ee.js` produisent le même
+  message ; le test JVM fait tourner Node pour le prouver.
+- **Un seul lien d'appairage** (`tomate://pair`) : QR, NFC, partage système et collage passent tous
+  par le même code, et il transporte les **clés publiques** — pas seulement un pseudo. Une clé
+  appairée est épinglée : l'annuaire ne peut plus la remplacer.
+- **Numéro de sécurité** affiché dans la conversation, avec la provenance de la clé (appairage
+  vérifié / annuaire à vérifier).
+- **Maillage façon bitchat** : en-tête clair + contenu opaque, TTL 7 décrémenté, déduplication
+  LRU 1000 sur 5 minutes, split horizon, délai aléatoire, courrier borné à 200 entrées / 24 h avec
+  **tag de destinataire rotatif quotidien**, signature vérifiée avant relais, opt-out utilisateur.
+- **Simplifications assumées** : un seul protocole de chiffrement (pas de Noise en plus), un seul
+  format d'appairage (l'ancien `tomato://add` reste accepté), une seule implémentation crypto
+  partagée au lieu de deux, plus de libellé générique « chiffrement » : chaque message et chaque
+  conversation disent leur état réel.
+
+### Limites déclarées (inchangées ou nouvelles)
+
+- **Aucun appareil, aucun émulateur** : ni BLE, ni Wi-Fi Direct, ni NFC réel, ni scan caméra.
+  La politique réseau est testée en JVM, la radio ne l'est pas.
+- **Pas de Double Ratchet** : une clé d'identité volée déchiffre les anciens messages. Pas de
+  confidentialité persistante, et l'interface ne le prétend pas.
+- **Groupes non chiffrés** : aucun chiffrement de groupe (MLS) dans cette version.
+- **Un appareil = une clé** : changer d'appareil rend les anciens messages illisibles.
+- **Clés de la PWA dans `localStorage`** : lisibles par un script injecté dans la page. L'app
+  Android, elle, les garde chiffrées par le Keystore.
+- **Migration 0011 non appliquée** : l'annuaire de clés est écrit mais pas encore utilisable en
+  production (5 contrôles HTTP en attente). L'appairage QR/NFC/lien fonctionne sans elle.
+- Toujours non faits : relais A→B→C sur trois téléphones, modération administrateur, appels de
+  groupe, chiffrement de groupe.

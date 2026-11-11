@@ -1,14 +1,14 @@
 # 🍅 TOMATE
 
 Réseau social **Android natif** et **PWA installable**, **offline-first**, en français, avec
-communication locale **Bluetooth Low Energy** et **Wi-Fi**, relais multi-appareils, et
-synchronisation Supabase.
+chiffrement de bout en bout 1-1, communication locale **Bluetooth Low Energy** et **Wi-Fi**,
+relais maillé multi-appareils, et synchronisation Supabase.
 
-> État : **version 0.1.2**, APK debug et PWA publiés en aperçu. Le compte se crée **avec ou
-> sans connexion**. Ce qui n'est pas testé est déclaré comme tel : lire [`STATUS.md`](STATUS.md)
-> avant toute démonstration.
+> État : **version 0.5.0**, APK debug et PWA compilés et vérifiés. Le compte se crée **avec ou
+> sans connexion**. Ce qui n'est pas testé sur matériel est déclaré honnêtement comme tel :
+> lire [`STATUS.md`](STATUS.md) et [`docs/11_HANDOFF.md`](docs/11_HANDOFF.md).
 >
-> PWA : https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page
+> Aperçu PWA : https://site-1b6f0f4eb331483ca0b74abd4600dd43.freebuff.page
 
 ## Sommaire
 
@@ -16,7 +16,7 @@ synchronisation Supabase.
 - [Démarrage rapide](#démarrage-rapide)
 - [Configuration Supabase](#configuration-supabase)
 - [Architecture](#architecture)
-- [Tests](#tests)
+- [Tests et validation](#tests-et-validation)
 - [Documentation](#documentation)
 - [Limites honnêtes](#limites-honnêtes)
 
@@ -28,19 +28,19 @@ synchronisation Supabase.
 | **Création de compte hors ligne** | ✅ | identité locale `local-…`, tout reste utilisable, liaison Supabase automatique au retour du réseau |
 | **PWA installable** | ✅ | `web/`, même backend, hors ligne (IndexedDB + service worker), permissions expliquées |
 | Profil | ✅ | pseudo validé, nom, bio, visibilité, édition, déconnexion |
-| Fil & publications | ✅ | composeur, fil local, suppression, réactions |
-| Commentaires | ✅ | ajout, suppression, compteurs |
-| Communautés | ✅ | création publique/privée, adhésion, publications réservées aux membres |
-| Messagerie | ✅ | conversations, envoi local-first, déduplication `client_id` |
-| Hors ligne | ✅ | Room source de vérité, outbox, backoff avec jitter |
-| Modération | ✅ | signalement, blocage, suppression, rôles |
-| Thème | ✅ | Material 3, clair/sombre/système, couleurs dynamiques |
-| Proximité BLE | ⚠️ | implémentation réelle (GATT serveur + client), **non testée sur matériel** |
-| Proximité Wi-Fi | ⚠️ | NSD + TCP réels, **non testés sur matériel** |
-| Relais multi-appareils | ⚠️ | moteur de politique testé en unitaire, **pas de test 3 téléphones** |
-| Chiffrement de bout en bout | ❌ | **non opérationnel et annoncé comme tel** |
-| Notifications push | ❌ | hors périmètre v0.1 |
-| Restauration de compte | ❌ | nécessite une fonction serveur non déployée |
+| Fil & publications | ✅ | composeur, fil local, suppression, réactions, édition, partage, photo/vidéo |
+| Stories | ✅ | texte, photo/vidéo, expiration 24 h, vues nominatives, suppression auteur |
+| Commentaires | ✅ | ajout, suppression, compteurs réels |
+| Communautés | ✅ | création publique/privée, adhésion, liste des membres, fil réservé aux membres |
+| Messagerie | ✅ | 1-1 et groupes, envoi local-first, déduplication `client_id`, citations, réactions, flammes 🔥 |
+| **Chiffrement de bout en bout (E2EE)** | ✅ | 1-1 opérationnel : ECIES P-256 + AES-GCM + signatures ECDSA, interopérabilité Android↔PWA vérifiée, appairage QR/NFC/lien |
+| Notifications | ✅ | centre de notifications dans l'application, déclencheurs serveur réels, code FCM conditionnel |
+| Appels WebRTC | ✅ | PWA opérationnelle, Android natif compilé, signalisation découpée et diagnostic TURN |
+| Hors ligne | ✅ | Room source de vérité, outbox, backoff exponentiel avec jitter |
+| Modération | ✅ | signalement, blocage, suppression, rôles Owner / Moderator |
+| Thème | ✅ | Material 3, clair/sombre/système, animations adaptées |
+| Proximité BLE / Wi-Fi | ⚠️ | implémentation réelle (GATT serveur + client, NSD + TCP), **non testée sur matériel physique** |
+| Relais maillé | ⚠️ | politique testée (TTL, dédup LRU, split horizon, courrier borné), **non testée sur 3 téléphones physiques** |
 
 ## Démarrage rapide
 
@@ -50,121 +50,31 @@ synchronisation Supabase.
 - JDK 21, Android SDK `platforms;android-37`, `build-tools;36.1.0`
 - Un appareil Android 8.0+ (API 26)
 
-### Installation de la toolchain
+### Commandes usuelles
 
 ```bash
-./tooling/bootstrap-android.sh
-source "$HOME/env.sh"
+# Tests unitaires JVM (108 tests)
+./gradlew :core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest :app:testDebugUnitTest --console=plain
+
+# Assemblage de l'APK
+./gradlew :app:assembleDebug --console=plain
+
+# Validation syntaxique Web
+node --check web/js/app.js web/js/e2ee.js web/js/extras.js web/js/queue.js
+
+# Scripts de validation Supabase
+bash ./tooling/rls_smoke_test.sh
+bash ./tooling/verify_040_reactions.sh
+bash ./tooling/verify_050_e2ee.sh
 ```
-
-### Build
-
-```bash
-./gradlew :app:assembleDebug
-# APK : app/build/outputs/apk/debug/app-debug.apk
-
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-`applicationId` de la variante debug : `app.tomate.debug`.
-
-### Tests
-
-```bash
-./gradlew :core:testDebugUnitTest :data:testDebugUnitTest :net:testDebugUnitTest
-```
-
-## Version web (PWA)
-
-```bash
-cd web && python3 -m http.server 3000 --bind 0.0.0.0
-```
-
-Même compte et mêmes données que l'Android : auth anonyme, fil, publications, réactions,
-commentaires, messagerie texte, communautés, météo Open-Meteo, file d'attente hors ligne,
-page de permissions réellement détectées. Le mesh BLE/Wi-Fi et le relais restent
-**Android uniquement** : aucun navigateur ne les permet, et la PWA l'explique.
-
-Détail, limites et preuves de test : [`docs/07_PWA.md`](docs/07_PWA.md).
-
-## Configuration Supabase
-
-Le projet Supabase public est déjà renseigné : seules les **migrations** restent à
-appliquer (option A, SQL Editor). Guide détaillé : [`docs/05_SUPABASE_SETUP.md`](docs/05_SUPABASE_SETUP.md).
-
-Dans **SQL Editor → New query**, coller le **contenu** de
-[`supabase/ALL_IN_ONE.sql`](supabase/ALL_IN_ONE.sql) (bouton *Raw* / *Copier le fichier*),
-puis **Run** une seule fois. Ce fichier contient les trois migrations dans le bon ordre.
-
-> Ne collez jamais un **chemin** de fichier (`supabase/migrations/0003_storage.sql`) : le SQL
-> Editor n'exécute que du SQL et répondrait `syntax error at or near "supabase"`.
-
-Ensuite, vérifier les RLS avec deux comptes réels :
-
-```bash
-./tooling/rls_smoke_test.sh
-```
-
-Aucune clé secrète n'est nécessaire ni présente dans le dépôt ou l'APK : seule la clé
-publique (`sb_publishable_…`) est embarquée, ce qui est son usage prévu.
-
-## Architecture
-
-Quatre modules Gradle :
-
-```
-:app  → Compose Material 3, navigation, ViewModels
-:data → Room, client Supabase (Ktor), repositories, SyncEngine, session
-:net  → BLE, Wi-Fi local, codec d'enveloppes, moteur de relais
-:core → modèles de domaine, Outcome/AppError, design system
-```
-
-Détails et décisions : [`docs/02_ARCHITECTURE.md`](docs/02_ARCHITECTURE.md).
-
-## Tests
-
-| Suite | Où | Exécutable sans appareil |
-|---|---|---|
-| Relais (11 tests) + codec (4 tests) | `net/src/test` | oui |
-| Backoff, récupération, pseudos, compte hors ligne (15 tests) | `data/src/test` | oui |
-| Persistance Room (5 tests) | `data/src/androidTest` | non (appareil requis) |
-| RLS multi-comptes (7 assertions) | `tooling/rls_smoke_test.sh` | oui, après migrations |
-
-Matrice complète et protocole multi-téléphones :
-[`docs/06_TESTS_ET_LIVRAISON.md`](docs/06_TESTS_ET_LIVRAISON.md).
 
 ## Documentation
 
-| Document | Contenu |
-|---|---|
-| [`docs/01_PRODUIT.md`](docs/01_PRODUIT.md) | vision, périmètre, écrans, non-fonctionnalités assumées |
-| [`docs/02_ARCHITECTURE.md`](docs/02_ARCHITECTURE.md) | modules, flux, ADR, décisions techniques |
-| [`docs/03_PROXIMITE.md`](docs/03_PROXIMITE.md) | protocole BLE/Wi-Fi, enveloppes, relais |
-| [`docs/04_SECURITE.md`](docs/04_SECURITE.md) | modèle de menace, RLS, E2EE, secrets |
-| [`docs/05_SUPABASE_SETUP.md`](docs/05_SUPABASE_SETUP.md) | migrations, SQL Editor, dépannage |
-| [`docs/06_TESTS_ET_LIVRAISON.md`](docs/06_TESTS_ET_LIVRAISON.md) | matrice de tests, multi-appareils, Play Store |
-| [`docs/07_PWA.md`](docs/07_PWA.md) | PWA : fonctions, limites navigateur, tests effectués |
-| [`STATUS.md`](STATUS.md) | état réel, vérifié, des fonctionnalités et des tests |
-
-## Limites honnêtes
-
-1. **E2EE absent.** Les messages sont protégés en transit (TLS) mais pas de bout en bout.
-   L'interface l'affiche clairement, partout où des messages apparaissent.
-2. **BLE/Wi-Fi non testés sur matériel.** Le code est réel, la radio est absente de
-   l'environnement de développement.
-3. **Relais non validé à trois appareils.** Le moteur de politique est couvert par des
-   tests unitaires (TTL, hops, doublons, quota, opt-out).
-4. **Restauration de compte indisponible.** Elle exigerait une fonction serveur.
-5. **Pseudo choisi hors ligne :** il est vérifié à la liaison au réseau. S'il est déjà pris,
-   l'app le signale et vos données locales restent intactes ; il faut alors changer de pseudo.
-6. **La déconnexion efface les données locales** de l'appareil (comportement confirmé dans
-   l'interface) : c'est voulu pour qu'aucun contenu ne reste visible après un changement de compte.
-7. **PWA : capabilities limitées par le navigateur.** Pas de BLE en arrière-plan, pas de
-   Wi-Fi Direct, pas de relais : ces fonctions restent Android. L'écran Réseau les liste.
-8. **Suppression de compte serveur à implémenter** avant toute publication Play Store.
-9. **Aucune publication Play Store n'a été effectuée**, et aucune ne le sera sans
-   autorisation explicite. La PWA n'est déployée qu'en **aperçu**, pas en production.
-
-## Licence
-
-Projet privé — tous droits réservés à l'auteur du dépôt.
+- [`docs/01_PRODUIT.md`](docs/01_PRODUIT.md) — Spécification produit et parcours
+- [`docs/02_ARCHITECTURE.md`](docs/02_ARCHITECTURE.md) — Architecture technique et modules
+- [`docs/04_SECURITE.md`](docs/04_SECURITE.md) — Modèle de sécurité et cryptographie
+- [`docs/07_PWA.md`](docs/07_PWA.md) — Client web PWA
+- [`docs/08_RESEAU_ET_CHIFFREMENT.md`](docs/08_RESEAU_ET_CHIFFREMENT.md) — Protocole E2EE et maillage
+- [`docs/09_MATRICE_FONCTIONNALITES.md`](docs/09_MATRICE_FONCTIONNALITES.md) — Matrice d'audit
+- [`docs/11_HANDOFF.md`](docs/11_HANDOFF.md) — Dossier de reprise complet
+- [`STATUS.md`](STATUS.md) — Journal d'avancement et preuves d'exécution

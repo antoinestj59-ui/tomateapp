@@ -9,11 +9,11 @@ promesse tient en trois points :
    localement d'abord, puis synchronisé quand la connexion revient.
 2. **Ça marche sans serveur à proximité.** Deux téléphones peuvent échanger directement en
    Bluetooth Low Energy ou en Wi-Fi local, et un troisième peut relayer sans lire.
-3. **Ça ne ment pas.** Aucun compteur inventé, aucun bouton décoratif, aucune promesse de
-   chiffrement de bout en bout tant qu'elle n'est pas tenue.
+3. **Ça ne ment pas.** Aucun compteur inventé, aucun bouton décoratif, chiffrement de
+   bout en bout 1-1 réel avec clés appairées, et statuts honnêtes sur l'état du réseau.
 
 Public visé : usage communautaire de proximité (quartier, événement, établissement), là où
-la connexion est mauvaise ou chère.
+la connexion est mauvaise, intermittente ou inexistante.
 
 ## 2. Principes de conception
 
@@ -21,67 +21,34 @@ la connexion est mauvaise ou chère.
 |---|---|
 | Offline-first | Room est la source de vérité locale ; le réseau est un synchroniseur, pas un prérequis |
 | Identité légère | Compte anonyme Supabase, pseudo choisi localement, aucun e-mail obligatoire |
-| Honnêteté de l'état | Chaque écran a ses états : chargement, vide, erreur, hors ligne |
+| Chiffrement réel | E2EE 1-1 basé sur ECDH P-256 + HKDF + AES-GCM + ECDSA, clés stockées chiffrées |
+| Honnêteté de l'état | Chaque écran a ses états : chargement, vide, erreur, hors ligne, état E2EE réel |
 | Sobriété | Pas de publicité, pas de traqueur, pas de permission inutile |
-| Contenu opaque en relais | Un relais transporte une enveloppe, jamais du contenu lisible par lui |
-| Modération réelle | Signalement, blocage, suppression, rôles de communauté — pas seulement des menus |
+| Contenu opaque en relais | Un relais transporte une enveloppe chiffrée ou opaque, jamais du contenu lisible |
+| Modération réelle | Signalement, blocage, suppression, rôles de communauté réels |
 
 ## 3. Écrans livrés
 
 | Écran | Contenu réel | Dépendances |
 |---|---|---|
-| **Onboarding** | Pseudo (validé 3–20 `[a-z0-9_]`, réservés refusés), visibilité du profil, avertissement explicite sur le compte anonyme | `ProfileRepository`, Supabase |
-| **Accueil / Fil** | Bandeau de stories (24 h), composeur (2000 caractères), fil local, réactions, compteur de commentaires, bandeau hors ligne, compteur d'opérations en attente | Room, `FeedRepository`, `StoryRepository`, `SyncEngine` |
-| **Stories** | Création (texte 300 caractères, 5 fonds, **photo ou vidéo**), visionneuse, marquage « vue », suppression par l'auteur, expiration 24 h même hors ligne | Room, `StoryRepository`, bucket `stories`, RLS |
-| **Détail publication** | Publication, commentaires (ajout, suppression), réaction, signalement, blocage de l'auteur, suppression de sa publication | Room, modération |
-| **Communautés** | Liste réelle, création (publique/privée), adhésion, demande en attente, sortie | Room, `CommunityRepository` |
-| **Détail communauté** | Description, nombre de membres, rôle, composeur réservé aux membres actifs, fil de la communauté | Room, RLS |
-| **Messages** | Liste des conversations avec dernier message, état de livraison et **flamme 🔥** (jours consécutifs à écrire tous les deux) | Room |
-| **Conversation** | Messages, envoi local-first, déduplication par `client_id`, état « en attente », flamme 🔥, bandeau E2EE honnête | Room, sync |
-| **Ajout par QR** | QR personnel, scan caméra (PWA), code collé ; crée la conversation même hors ligne | PWA `BarcodeDetector`, Android QR affiché |
-| **Proximité** | Permissions runtime, découverte BLE/Wi-Fi, envoi direct, activation du relais, file de relais | `:net` |
-| **Profil** | Profil éditable, identifiant de compte, code de récupération, blocages, opérations en attente, déconnexion | Room, Keystore, modération |
-| **Réglages** | Thème (système/clair/sombre), couleurs dynamiques, relais, économie de batterie, confidentialité, à propos | `SettingsStore` |
+| **Onboarding** | Pseudo validé (3–20 caractères), visibilité du profil, création avec ou sans connexion | `ProfileRepository`, Supabase |
+| **Accueil / Fil** | Stories (24 h), composeur, fil local, réactions, commentaires, média photo/vidéo, météo | Room, `FeedRepository`, `StoryRepository`, `SyncEngine` |
+| **Stories** | Texte, fond coloré, photo/vidéo, visionneuse, marquage lu nominatif, suppression auteur, expiration 24 h | Room, `StoryRepository`, bucket `stories` |
+| **Détail publication** | Publication, commentaires avec suppression, réactions, signalement, blocage de l'auteur | Room, modération |
+| **Communautés** | Liste, création publique/privée, adhésion, modération des demandes, fil réservé aux membres | Room, `CommunityRepository` |
+| **Messages** | Liste des conversations avec filtres (Toutes, Privées, Groupes, Non lues), flammes 🔥, statut E2EE | Room, `MessagingRepository` |
+| **Conversation** | Envoi local-first, déduplication `client_id`, réponses citées, réactions, chiffrement 1-1 réel | Room, `E2eeService`, crypto |
+| **Appairage** | Lien `tomate://pair`, QR ZXing, étiquette NFC NDEF, numéro de sécurité partagé | `PairingQr`, `PairingNfc`, `E2eeStore` |
+| **Notifications** | Liste des notifications (messages, réactions, adhésions), marquage lu/tout lu, navigation directe | `NotificationRepository` |
+| **Appels** | WebRTC 1-1 audio/vidéo, signalisation découpée, diagnostic STUN/TURN, interface d'appel | `CallEngine`, `CallController` |
+| **Proximité / Maillage** | Découverte BLE et Wi-Fi local, routage maillé TTL 7, déduplication, boîte de courrier bornée | `:net` |
+| **Profil** | Édition du profil, identifiant de compte, dialogue E2EE dédié, code de récupération, déconnexion | Room, Keystore, modération |
 
-## 4. États obligatoires
+## 4. Ce qui est différé / hors périmètre 0.5.0
 
-Chaque liste et chaque action respecte la même grammaire visuelle :
-
-- **Chargement** : indicateur + libellé explicite (« Chargement du fil… »).
-- **Vide** : icône, titre, explication, action quand elle a un sens.
-- **Erreur** : message en français issu de `AppError`, action de réessai quand possible.
-- **Hors ligne** : bandeau informatif, jamais une erreur bloquante.
-- **En attente** : opérations non synchronisées comptées et visibles.
-- **Indisponible** : fonction présente mais non opérationnelle → affichée comme telle
-  (ex. restauration de compte, E2EE).
-
-## 5. Ce que TOMATE ne fait pas (volontairement)
-
-| Non-fonctionnalité | Raison | Où c'est dit |
-|---|---|---|
-| Chiffrement de bout en bout | Aucun protocole vérifié intégré ; ne pas mentir | Profil, Conversation, Réglages, `docs/04_SECURITE.md` |
-| Restauration de compte sur un autre appareil | Nécessite une fonction serveur non déployée | Profil |
-| Appels audio/vidéo | Hors périmètre de la version 0.1 | — |
-| Upload d'avatars depuis l'app | Bucket et politiques fournis, UI d'upload non branchée | `docs/05_SUPABASE_SETUP.md` |
-| Notifications push | Nécessite FCM + fonction serveur | — |
-| Suppression de compte côté serveur | Exigée par Play Store, à implémenter avant publication | `docs/06_TESTS_ET_LIVRAISON.md` |
-
-## 6. Parcours principal
-
-```
-Premier lancement
-  └─ Onboarding (pseudo + visibilité)
-       └─ Fil (vide → composer une publication)
-            ├─ Détail publication → commenter / réagir / signaler / bloquer
-            ├─ Communautés → créer / rejoindre → publier dans la communauté
-            ├─ Messages → conversation → envoi (local-first)
-            └─ Proximité → permissions → découverte → envoi direct / relais
-```
-
-## 7. Accessibilité et ergonomie
-
-- Cibles tactiles ≥ 48 dp, contrastes du thème Material 3, tailles de texte dynamiques.
-- Tous les textes sont en français, sans jargon technique dans l'interface.
-- Les erreurs réseau ne bloquent jamais la lecture du contenu déjà présent.
-- Les actions destructrices (déconnexion, suppression) demandent confirmation.
-- `contentDescription` renseigné sur les icônes interactives.
+| Fonction | Raison / Statut |
+|---|---|
+| Chiffrement des conversations de groupe | Requiert un protocole de groupe (MLS) complexe, différé après la v0.5 |
+| Suppression de compte côté serveur | Exigée pour le Play Store, à intégrer avant mise en production publique |
+| Test sur parc physique de téléphones | L'environnement cloud n'embarque pas d'appareils physiques pour valider la radio |
+| Double Ratchet | Clés révoquées post-compromission non prises en charge dans la v0.5 |

@@ -4,9 +4,6 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
@@ -22,20 +19,24 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import tomate.app.ui.components.PostCard
 import tomate.app.ui.home.ComposerActions
-import tomate.app.ui.navigation.NavigationTabLabel
+import tomate.app.ui.navigation.TomateBottomBar
 import tomate.app.ui.navigation.TomateDestination
 import tomate.core.designsystem.components.TomateCard
 import tomate.core.designsystem.theme.TomateSpacing
 import tomate.core.designsystem.theme.TomateTheme
+import tomate.app.ui.home.StoriesStrip
+import tomate.core.model.Post
+import tomate.core.model.Story
+import tomate.core.model.Visibility
 
 /**
- * Rend les deux zones qui cassaient sur l'appareil de l'utilisateur (barre d'onglets et ligne
- * d'actions du composeur) sur un écran de 360 dp, hors appareil, avec de vrais pixels.
+ * Rend les zones refondues sur un écran de 360 dp, hors appareil, avec de vrais pixels.
  *
  * Les PNG sont écrits dans `app/build/ui-screenshots/` : ils sont regardés, pas seulement générés.
  * Les assertions comparent la hauteur des libellés entre eux : un libellé qui passe à la ligne
- * double sa hauteur, ce qui est exactement le défaut constaté.
+ * double sa hauteur, ce qui était exactement le défaut constaté sur téléphone.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -58,16 +59,13 @@ class UiScreenshotTest {
     fun bottom_navigation_labels_stay_on_one_line() {
         compose.setContent {
             TomateTheme(dynamicColor = false) {
-                NavigationBar {
-                    TomateDestination.entries.forEachIndexed { index, destination ->
-                        NavigationBarItem(
-                            selected = index == 0,
-                            onClick = {},
-                            icon = { Icon(destination.icon, contentDescription = destination.label) },
-                            label = { NavigationTabLabel(destination.label) },
-                        )
-                    }
-                }
+                TomateBottomBar(
+                    currentRoute = TomateDestination.Home.route,
+                    unreadMessages = 4,
+                    pendingOperations = 0,
+                    onSelect = {},
+                    onCompose = {},
+                )
             }
         }
         save("navigation.png")
@@ -108,6 +106,62 @@ class UiScreenshotTest {
         assertTrue(
             "« Événement » ($event px) ne doit pas passer à la ligne face à « Photo » ($photo px)",
             event <= photo + 4,
+        )
+    }
+
+    /** Rangée de stories : tuile « + » et avatars cerclés, comme les maquettes. */
+    @Test
+    fun stories_strip_renders_add_tile_and_rings() {
+        val now = System.currentTimeMillis()
+        val stories = listOf(
+            Story(id = "s1", authorId = "u1", authorHandle = "lea", authorDisplayName = "Léa", body = "", createdAt = now, expiresAt = now + 3_600_000),
+            Story(id = "s2", authorId = "u2", authorHandle = "mathis", authorDisplayName = "Mathis", body = "", createdAt = now, expiresAt = now + 3_600_000, viewedByMe = true),
+            Story(id = "s3", authorId = "u3", authorHandle = "emma", authorDisplayName = "Emma", body = "", createdAt = now, expiresAt = now + 3_600_000),
+        )
+        compose.setContent {
+            TomateTheme(dynamicColor = false) {
+                StoriesStrip(stories = stories, myId = "me", onAdd = {}, onOpen = {})
+            }
+        }
+        save("stories.png")
+
+        val add = heightOf("Ajouter une story")
+        val name = heightOf("Léa")
+        assertTrue(
+            "Le libellé « Ajouter une story » ($add px) doit tenir sur deux lignes maximum " +
+                "(référence « Léa » : $name px)",
+            add <= name * 2 + 8,
+        )
+    }
+
+    /** Carte de publication refondue : identité, texte, rangée d'actions sur une ligne. */
+    @Test
+    fun post_card_renders_identity_and_actions() {
+        val post = Post(
+            id = "post-1",
+            authorId = "user-1",
+            authorHandle = "lucas",
+            authorDisplayName = "Lucas",
+            body = "Quelle belle journée ! ☀️",
+            visibility = Visibility.Public,
+            createdAt = System.currentTimeMillis() - 12 * 60_000L,
+            reactionCount = 248,
+            commentCount = 32,
+        )
+        compose.setContent {
+            TomateTheme(dynamicColor = false) {
+                Column(modifier = Modifier.fillMaxWidth().padding(TomateSpacing.l)) {
+                    PostCard(post = post, onOpen = {}, onReact = {})
+                }
+            }
+        }
+        save("post-card.png")
+
+        val share = heightOf("Partager")
+        val reaction = heightOf("248")
+        assertTrue(
+            "« Partager » ($share px) et le compteur ($reaction px) doivent tenir sur une ligne",
+            share <= reaction + 6,
         )
     }
 }

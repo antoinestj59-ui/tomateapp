@@ -16,17 +16,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -34,7 +37,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,33 +64,96 @@ import tomate.core.model.ContactCandidate
 @Composable
 fun MessagesScreen(
     onOpenConversation: (String) -> Unit,
+    openComposerRequest: Boolean = false,
+    onComposerRequestConsumed: () -> Unit = {},
     viewModel: MessagesViewModel = viewModel(factory = tomateViewModelFactory { MessagesViewModel(it) }),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var filter by remember { mutableStateOf(ConversationFilter.All) }
+
+    LaunchedEffect(openComposerRequest) {
+        if (openComposerRequest) {
+            viewModel.openDialog()
+            onComposerRequestConsumed()
+        }
+    }
+
+    val visible = remember(state.conversations, filter) {
+        when (filter) {
+            ConversationFilter.All -> state.conversations
+            ConversationFilter.Groups -> state.conversations.filter { it.isGroup }
+            ConversationFilter.Direct -> state.conversations.filter { !it.isGroup }
+            ConversationFilter.Unread -> state.conversations.filter { it.unreadCount > 0 }
+        }
+    }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Messages") }) },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = viewModel::openDialog,
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Nouvelle conversation") },
+        topBar = {
+            TopAppBar(
+                title = { Text("Messages", fontWeight = FontWeight.Bold) },
+                actions = {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = TomateSpacing.s)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .clickable(onClick = viewModel::openDialog),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Nouvelle conversation",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                },
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = viewModel::openDialog,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Icon(Icons.Filled.ChatBubbleOutline, contentDescription = "Nouvelle conversation")
+            }
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             TomateInlineNotice(
-                text = "Chiffrement : ${state.e2eeLabel}. Le chiffrement de bout en bout n'est pas encore opérationnel.",
-                tone = NoticeTone.Warning,
-                modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.s),
+                text = "Chiffrement : ${state.e2eeLabel} (les messages 1-1 échangés avec une clé appairée sont chiffrés).",
+                tone = NoticeTone.Info,
+                modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.xs),
             )
             if (state.error != null) {
                 TomateInlineNotice(
                     text = state.error!!.userMessage,
                     tone = NoticeTone.Error,
-                    modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.s),
+                    modifier = Modifier.padding(horizontal = TomateSpacing.l, vertical = TomateSpacing.xs),
                 )
             }
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = TomateSpacing.l, vertical = TomateSpacing.s),
+                horizontalArrangement = Arrangement.spacedBy(TomateSpacing.s),
+            ) {
+                items(ConversationFilter.entries) { option ->
+                    FilterChip(
+                        selected = filter == option,
+                        onClick = { filter = option },
+                        label = { Text(option.label) },
+                        shape = CircleShape,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ),
+                    )
+                }
+            }
+
             when {
                 state.loading -> TomateLoadingState()
                 state.conversations.isEmpty() -> TomateEmptyState(
@@ -93,11 +163,16 @@ fun MessagesScreen(
                     actionLabel = "Nouvelle conversation",
                     onAction = viewModel::openDialog,
                 )
+                visible.isEmpty() -> Text(
+                    text = "Aucune conversation dans « ${filter.label} ».",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(TomateSpacing.l),
+                )
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(TomateSpacing.l),
-                    verticalArrangement = Arrangement.spacedBy(TomateSpacing.m),
+                    contentPadding = PaddingValues(bottom = TomateSpacing.xxl),
                 ) {
-                    items(state.conversations, key = { it.id }) { conversation ->
+                    items(visible, key = { it.id }) { conversation ->
                         ConversationRow(
                             conversation = conversation,
                             onClick = { onOpenConversation(conversation.id) },
@@ -279,4 +354,15 @@ private fun ContactPickerRow(
             )
         }
     }
+}
+
+/**
+ * Filtres de conversation. Chaque option correspond à un champ réel de [Conversation] :
+ * aucune catégorie inventée (pas de « Appels » sans historique d'appels stocké).
+ */
+private enum class ConversationFilter(val label: String) {
+    All("Toutes"),
+    Direct("Privées"),
+    Groups("Groupes"),
+    Unread("Non lues"),
 }

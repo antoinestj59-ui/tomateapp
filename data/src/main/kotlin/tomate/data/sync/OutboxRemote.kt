@@ -19,6 +19,8 @@ interface OutboxRemote {
         ignoreDuplicates: Boolean = false,
     ): Outcome<String>
 
+    suspend fun update(table: String, filter: List<Pair<String, String>>, body: String): Outcome<String>
+
     suspend fun delete(table: String, filter: List<Pair<String, String>>): Outcome<String>
 
     suspend fun select(

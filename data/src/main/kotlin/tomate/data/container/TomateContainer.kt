@@ -1,6 +1,7 @@
 package tomate.data.container
 
 import android.content.Context
+import java.io.File
 import tomate.core.model.Outcome
 import tomate.data.backend.DataStoreSessionStore
 import tomate.data.backend.HttpClientFactory
@@ -9,13 +10,16 @@ import tomate.data.backend.SessionStore
 import tomate.data.backend.SupabaseApi
 import tomate.data.backend.SupabaseConfig
 import tomate.data.db.TomateDatabase
-import tomate.data.e2ee.E2eeEngine
-import tomate.data.e2ee.E2eeNotConfigured
+import tomate.data.e2ee.E2eeService
+import tomate.data.e2ee.E2eeStore
+import tomate.data.e2ee.FileE2eeStore
 import tomate.data.network.NetworkMonitor
 import tomate.data.repo.CommunityRepository
+import tomate.data.repo.E2eeRepository
 import tomate.data.repo.FeedRepository
 import tomate.data.repo.MessagingRepository
 import tomate.data.repo.ModerationRepository
+import tomate.data.repo.NotificationRepository
 import tomate.data.repo.ProfileRepository
 import tomate.data.repo.PushRepository
 import tomate.data.repo.StoryRepository
@@ -47,7 +51,12 @@ class TomateContainer(
     }
     val session: SessionManager by lazy { SessionManager(api, sessionStore) }
     val push: PushRepository by lazy { PushRepository(api, session) }
-    val e2ee: E2eeEngine = E2eeNotConfigured()
+    /** Clés de chiffrement de l'appareil, chiffrées au repos par le Keystore. */
+    val e2eeStore: E2eeStore by lazy {
+        FileE2eeStore(File(appContext.filesDir, "e2ee-identity.json"), crypto)
+    }
+    val e2eeDirectory: E2eeRepository by lazy { E2eeRepository(api, session, e2eeStore) }
+    val e2ee: E2eeService by lazy { E2eeService(e2eeStore, e2eeDirectory) }
     val networkMonitor: NetworkMonitor by lazy { NetworkMonitor(appContext) }
     val settings: tomate.data.settings.SettingsStore by lazy {
         tomate.data.settings.SettingsStore(appContext)
@@ -89,6 +98,7 @@ class TomateContainer(
             e2ee = e2ee,
         )
     }
+    val notifications: NotificationRepository by lazy { NotificationRepository(api) }
     val moderation: ModerationRepository by lazy {
         ModerationRepository(api, database.blockDao(), database.outboxDao(), session)
     }

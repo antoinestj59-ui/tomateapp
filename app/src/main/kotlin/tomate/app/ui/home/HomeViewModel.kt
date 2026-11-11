@@ -73,6 +73,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val lastFailure: String?,
         val hasProfile: Boolean,
         val myId: String?,
+        val myLabel: String,
     )
 
     data class UiState(
@@ -90,6 +91,10 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         val lastFailure: String? = null,
         val hasProfile: Boolean = false,
         val myId: String? = null,
+        /** Nom affiché du compte connecté (avalatar de l'en-tête) ; vide si aucun profil. */
+        val profileLabel: String = "",
+        /** Notifications non lues côté serveur (table 0007) ; 0 si indisponible. */
+        val unreadNotifications: Int = 0,
         val storyDraft: StoryDraft? = null,
         val eventDraft: EventDraft? = null,
     )
@@ -101,6 +106,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
     private val storyDraft = MutableStateFlow<StoryDraft?>(null)
     private val eventDraft = MutableStateFlow<EventDraft?>(null)
     private val now = MutableStateFlow(System.currentTimeMillis())
+    private val unreadNotifications = MutableStateFlow(0)
 
     /** Attente réelle (encore vivante) et refus définitifs, tenus séparés à l'écran. */
     private data class OutboxState(val pending: Int, val failed: Int, val lastFailure: String?)
@@ -133,6 +139,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             lastFailure = networkPair.second.lastFailure,
             hasProfile = profile?.handle?.isNotBlank() == true,
             myId = profile?.id,
+            myLabel = profile?.displayName?.ifBlank { profile.handle }.orEmpty(),
         )
     }
 
@@ -142,7 +149,13 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         stories.filterNot { it.isExpired(instant) }
     }
 
-    val state: StateFlow<UiState> = combine(base, activeStories, storyDraft, eventDraft) { b, stories, draft, event ->
+    val state: StateFlow<UiState> = combine(
+        base,
+        activeStories,
+        storyDraft,
+        eventDraft,
+        unreadNotifications,
+    ) { b, stories, draft, event, unread ->
         UiState(
             posts = b.posts,
             stories = stories,
@@ -158,6 +171,8 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             lastFailure = b.lastFailure,
             hasProfile = b.hasProfile,
             myId = b.myId,
+            profileLabel = b.myLabel,
+            unreadNotifications = unread,
             storyDraft = draft,
             eventDraft = event,
         )
@@ -177,6 +192,15 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
         composer.value = composer.value.copy(text = text.take(2000))
     }
 
+    /** Compte réel des notifications non lues ; l'échec réseau laisse simplement le badge à 0. */
+    private suspend fun refreshUnreadNotifications() {
+        when (val result = container.notifications.load(limit = 20)) {
+            is Outcome.Success -> unreadNotifications.value =
+                result.value.second.count { !it.read }
+            is Outcome.Failure -> Unit
+        }
+    }
+
     fun refresh() {
         viewModelScope.launch {
             refreshing.value = true
@@ -191,6 +215,7 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
             val stories = container.stories.refresh()
             if (stories is Outcome.Failure) error.value = stories.error
             runCatching { container.sync.drain() }
+            refreshUnreadNotifications()
             loading.value = false
             refreshing.value = false
         }
@@ -240,6 +265,47 @@ class HomeViewModel(private val container: TomateContainer) : ViewModel() {
                     composer.value = composer.value.copy(posting = false)
                 }
             }
+        }
+    }
+
+    private val editingPost = MutableStateFlow<Post?>(null)
+    private val editText = MutableStateFlow("")
+
+    fun startEdit(post: Post) {
+        editingPost.value = post
+        editText.value = post.body
+    }
+
+    fun onEditChange(value: String) {
+        editText.value = value.take(2000)
+    }
+
+    fun cancelEdit() {
+        editingPost.value = null
+    }
+
+    fun confirmEdit() {
+        val post = editingPost.value ?: return
+        val body = editText.value
+        viewModelScope.launch {
+            when (val result = container.feed.editPost(post.id, body)) {
+                is Outcome.Success -> editingPost.value = null
+                is Outcome.Failure -> error.value = result.error
+            }
+        }
+    }
+
+    fun editingState(): kotlinx.coroutines.flow.Flow<Pair<Post?, String>> =
+        kotlinx.coroutines.flow.combine(editingPost, editText) { p, t -> p to t }
+
+    /** Suppression réelle de sa propre publication (le serveur applique `posts_delete_author`). */
+    fun deletePost(post: Post) {
+        viewModelScope.launch {
+            when (val result = container.feed.deletePost(post.id)) {
+                is Outcome.Success -> Unit
+                is Outcome.Failure -> error.value = result.error
+            }
+            refresh()
         }
     }
 

@@ -4,8 +4,8 @@
 
 | Question | Réponse honnête |
 |---|---|
-| Les messages sont-ils chiffrés de bout en bout ? | **Non.** TLS vers Supabase uniquement. L'UI l'indique partout. |
-| Y a-t-il de la cryptographie maison ? | **Non.** Aucun algorithme implémenté à la main ; Android Keystore + AES-GCM uniquement. |
+| Les messages sont-ils chiffrés de bout en bout ? | **Oui pour les conversations 1-1, non pour les groupes.** Le serveur ne stocke que du chiffré pour un échange à deux ; l'UI l'affiche message par message. |
+| Y a-t-il de la cryptographie maison ? | **Aucun algorithme inventé.** P-256, HKDF-SHA256, AES-256-GCM et ECDSA viennent de la JCA Android et de WebCrypto. Seul HKDF est écrit à la main (API 33+ seulement), et il est vérifié contre le vecteur officiel du RFC 5869. |
 | Y a-t-il une clé secrète dans l'app ? | **Non.** Seule la clé publique `sb_publishable_…` est embarquée. |
 | Les données sont-elles protégées côté serveur ? | **Oui, par RLS** : chaque table est verrouillée par défaut (`0002_rls.sql`). |
 | Un relais peut-il lire les messages ? | **Non** : il transporte une enveloppe opaque et ne persiste rien. |
@@ -68,34 +68,52 @@ Le contenu des messages et publications n'est **pas** chiffré au repos dans Roo
 est explicite : le chiffrement de la base locale exigerait SQLCipher (dépendance native) et
 donnerait une fausse impression de sécurité sans E2EE. À traiter comme un chantier dédié.
 
-## 5. E2EE : état réel et plan
+## 5. E2EE : état réel (0.5.0)
 
-### État
+### Ce qui est fait
 
-```kotlin
-class E2eeNotConfigured : E2eeEngine {
-    override val status = E2eeStatus.NotConfigured
-    override suspend fun encrypt(...) = E2eeResult.Failed("Le chiffrement de bout en bout n'est pas encore opérationnel…")
-    override suspend fun decrypt(...) = E2eeResult.Failed(...)
-}
+| Brique | Détail | Vérification |
+|---|---|---|
+| Identité | Deux paires P-256 par appareil : **accord** (ECDH) et **signature** (ECDSA) | `EcKeys` + tests |
+| Dérivation | ECDH → HKDF-SHA256 (sel = SHA-256 de la clé éphémère, info `tomate-e2ee-v1`) → clé AES-256 | vecteur RFC 5869 + interop |
+| Message | Clé éphémère par message (ECIES), AES-256-GCM, IV 12 octets, tag 16 octets, AAD = `info|conversation|émetteur|epk` | 10 tests Kotlin |
+| Authenticité | Signature ECDSA P-256 sur `aad|iv|ct`, vérifiée avant déchiffrement | test + HTTP réel |
+| Interopérabilité | Android et PWA produisent et lisent le **même** format | `E2eeInteropTest` lance Node sur le vrai `web/js/e2ee.js` |
+| Clés au repos | Clés privées chiffrées par le Keystore Android (`CryptoBox`), jamais envoyées | test « les clés privées ne sont pas écrites en clair » |
+| Annuaire | `profiles.e2ee_agree_key` / `e2ee_sign_key` (migration `0011`) | script `verify_050_e2ee.sh` |
+| Appairage | Lien unique `tomate://pair` avec les deux clés publiques → QR (ZXing), NFC (NDEF), collage | 4 tests Robolectric |
+| Clé épinglée | Une clé reçue par appairage ne peut pas être remplacée par l'annuaire | test dédié |
+| Numéro de sécurité | Empreinte des quatre clés, identique des deux côtés | test Kotlin + Node |
+| Affichage | Chaque message porte « 🔒 chiffré » ou « non chiffré » ; un message illisible est dit tel quel | code + tests |
+
+Format transporté dans `messages.body` :
+
+```
+[[tomate:e2ee:v1]]<from>|<epk>|<iv>|<signature>|<ciphertext>     (base64url sans remplissage)
 ```
 
-L'interface ne peut donc pas afficher par erreur un cadenas : `E2eeStatus.badgeLabel()`
-renvoie « Non chiffré de bout en bout » tant que l'état n'est pas `Operational`.
-Un chiffrement partiel (chiffrer sans gérer les prekeys, les sessions et les safety
-numbers) serait **pire que l'absence** : il donnerait une garantie fausse.
+### Modèle de menace, sans embellissement
 
-### Candidat retenu pour un jalon dédié
+| Menace | Protégé ? |
+|---|---|
+| Lecture par l'opérateur du serveur / une sauvegarde de base | **Oui** pour les messages 1-1 : le corps stocké est le chiffré. |
+| Modification d'un message en base | **Oui** : la signature ECDSA de l'émetteur ne valide plus. |
+| Usurpation d'émetteur | **Partiellement** : il faut la clé de l'émetteur, obtenue par appairage (vérifiée) ou par l'annuaire (non vérifiée). |
+| Substitution de clé par un serveur malveillant sur un contact **appairé** | **Non** : la clé épinglée gagne toujours. |
+| Substitution de clé sur un contact **non appairé** | **Oui, possible** : c'est pourquoi l'UI écrit « clé de l'annuaire, à vérifier » et affiche le numéro de sécurité. |
+| Compromission ultérieure de la clé privée du destinataire | **Non protégé** : pas de Double Ratchet, donc pas de confidentialité persistante. |
+| Groupes | **Non chiffrés** : aucune implémentation MLS retenue ; l'UI l'écrit. |
+| Multi-appareil | **Un appareil = une clé.** Se connecter sur un autre appareil rend les anciens messages illisibles. |
+| Analyse de trafic côté serveur (qui parle à qui, quand) | **Non protégé** : les métadonnées restent visibles. |
 
-| Candidat | Version | Pourquoi | Prérequis |
-|---|---|---|---|
-| `org.signal:libsignal-android` | 0.76.1 (Maven Central) | protocole Signal réel (X3DH + Double Ratchet), maintenu, audité | publication de prekeys, stockage de sessions, UI de safety numbers, composant serveur |
-| MLS (RFC 9420) | — | adapté aux groupes | aucune implémentation Kotlin/Android maintenue vérifiée |
+### Ce qui reste à faire, dans l'ordre
 
-Un jalon E2EE complet doit inclure : génération et publication de prekeys, établissement de
-session, chiffrement/déchiffrement, rotation, vérification hors bande (safety numbers),
-tests d'interopérabilité, et migration des conversations existantes. Tant que ce jalon
-n'est pas terminé **et vérifié**, l'app annonce l'absence.
+1. **Appliquer la migration `0011`** puis relancer `tooling/verify_050_e2ee.sh` (5 contrôles d'annuaire en attente).
+2. Double Ratchet (libsignal) pour la confidentialité persistante — gros chantier, à ne pas simuler.
+3. Chiffrement de groupe (MLS) ou, au minimum, une clé de groupe distribuée par message.
+4. Clés PWA : aujourd'hui dans `localStorage` (lisibles par un script de la page) ; passer à des
+   `CryptoKey` non exportables stockées en IndexedDB.
+5. Test matériel : deux téléphones à portée pour le BLE, une étiquette NFC réelle, un scan caméra.
 
 ## 6. RLS : principes appliqués
 
