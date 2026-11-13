@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -27,12 +29,30 @@ android {
         buildConfig = true
     }
 
+    // La clé de signature vit dans artifacts/keystore.properties (hors dépôt).
+    // Sans ce fichier, le build release reste possible mais non signé.
+    val releaseProps = Properties().apply {
+        val file = rootProject.file("artifacts/keystore.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+    signingConfigs {
+        if (releaseProps.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(releaseProps.getProperty("storeFile"))
+                storePassword = releaseProps.getProperty("storePassword")
+                keyAlias = releaseProps.getProperty("keyAlias")
+                keyPassword = releaseProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

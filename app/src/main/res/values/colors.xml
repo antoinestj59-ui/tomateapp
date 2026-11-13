@@ -2,4 +2,6 @@
 <resources>
     <color name="tomate_background">#FFF8F6</color>
     <color name="tomate_primary">#C0392B</color>
+    <!-- Repli clair : la variante nuit est déclarée dans values-night. -->
+    <color name="tomate_background_dark">#1A1110</color>
 </resources>

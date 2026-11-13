@@ -693,3 +693,17 @@ Dernière vérification : **13 novembre 2026**.
 - **La PWA n'a pas encore l'interface d'amis** : elle est à jour sur le reste (0.5.0) mais ce
   parcours est Android seulement pour l'instant.
 - Toujours aucun appareil : les écrans sont compilés, pas parcourus à la main.
+
+## 11. Version publiable 0.6.0 — signature et finition visuelle (13 novembre 2026)
+
+| Élément | Résultat |
+|---|---|
+| `:app:assembleRelease` | **BUILD SUCCESSFUL**, APK signé, certificat `CN=TOMATE` (SHA-256 `3403fe0f…712b`) |
+| Clé de signature | `artifacts/tomate-release.jks` + `artifacts/keystore.properties`, **hors dépôt**, à conserver |
+| Lint release | un vrai défaut corrigé : `tomate_background_dark` n'avait pas de repli dans `values/` |
+| PWA | `0.6.0-web`, cache `tomate-shell-v36`, déployée et vérifiée en HTTP |
+| Finition visuelle PWA | notices informatives neutres (plus de rouge), en-tête et navigation resserrés, libellés en petites capitales, primaire en dégradé doux |
+| Faux test Bluetooth retiré de la PWA | il produisait une erreur brute en anglais ; le mesh reste annoncé comme réservé à Android |
+
+Limites : la refonte visuelle Android n'a pas été faite dans cette passe (mêmes écrans, même thème 0.4) ;
+aucun appareil pour vérifier l'APK release à l'écran.

@@ -2362,7 +2362,7 @@ function networkView() {
     <div class="section-title"><h2>Autorisations et capacités</h2></div>
     <div class="card">
       ${capRow('Contexte sécurisé (HTTPS)', caps.secure, caps.secure ? 'requis pour le service worker' : 'installez la PWA via HTTPS')}
-      ${capRow('Bluetooth (Web Bluetooth)', caps.bluetooth, caps.bluetooth ? 'appairage à la demande, Chrome/Edge Android' : 'non exposé par ce navigateur')}
+      ${capRow('Bluetooth (Web Bluetooth)', false, 'non utilisé : le maillage est réservé à l’application Android')}
       ${capRow('Partage système', caps.share, caps.share ? 'partage natif du lien' : 'non disponible')}
       ${capRow('Notifications locales', caps.notifications, caps.notifications ? 'après votre autorisation explicite' : 'non disponible')}
       ${capRow('Géolocalisation', caps.geolocation, caps.geolocation ? 'utilisée seulement pour la météo, sur demande' : 'non disponible')}
@@ -2372,11 +2372,13 @@ function networkView() {
 
     <div class="section-title"><h2>Tester réellement</h2></div>
     <div class="card col">
-      <div class="row-between">
-        <div><strong>Bluetooth</strong><div class="small muted">Ouvre le sélecteur du navigateur et affiche l'appareil choisi.</div></div>
-        <button class="btn btn-soft" data-act="bt-test" ${caps.bluetooth ? '' : 'disabled'}>Tester</button>
+      <div>
+        <strong>Bluetooth et réseau local</strong>
+        <div class="small muted">
+          La PWA ne peut pas relayer en arrière-plan : le maillage BLE/Wi-Fi est réservé à
+          l'application Android. Aucun bouton ne fait semblant ici.
+        </div>
       </div>
-      ${bt ? `<div class="notice success">Appareil sélectionné : <strong>${esc(bt.name || 'sans nom')}</strong> (${esc(bt.id)})</div>` : ''}
       <div class="divider"></div>
       <div class="row-between">
         <div><strong>Partager TOMATE</strong><div class="small muted">Utilise le partage natif du système.</div></div>
@@ -3409,18 +3411,6 @@ document.addEventListener('click', async (event) => {
           render();
         }
         break;
-      case 'bt-test': {
-        if (!('bluetooth' in navigator)) return toast('Web Bluetooth indisponible sur ce navigateur.');
-        try {
-          const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
-          S.btDevice = { name: device.name, id: device.id };
-          toast(`Appareil sélectionné : ${device.name || 'sans nom'}`);
-        } catch (error) {
-          S.lastError = `Sélection Bluetooth annulée ou refusée : ${error.message}`;
-        }
-        render();
-        break;
-      }
       case 'share':
         if (navigator.share) {
           try {
