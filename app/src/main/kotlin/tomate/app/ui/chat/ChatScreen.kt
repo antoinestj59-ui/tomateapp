@@ -1,5 +1,7 @@
 package tomate.app.ui.chat
 
+import android.widget.Toast
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -75,7 +77,12 @@ import tomate.core.designsystem.components.NoticeTone
 import tomate.core.designsystem.theme.TomateSpacing
 
 @Composable
-private fun ConversationMenu(viewModel: ChatViewModel, canDelete: Boolean, isGroup: Boolean) {
+private fun ConversationMenu(
+    viewModel: ChatViewModel,
+    canDelete: Boolean,
+    isGroup: Boolean,
+    onRequestFriend: () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
         Icon(Icons.Default.MoreVert, contentDescription = "Actions de la conversation")
@@ -87,6 +94,15 @@ private fun ConversationMenu(viewModel: ChatViewModel, canDelete: Boolean, isGro
                 onClick = {
                     open = false
                     viewModel.openRename()
+                },
+            )
+        }
+        if (!isGroup) {
+            DropdownMenuItem(
+                text = { Text("Demander en ami") },
+                onClick = {
+                    open = false
+                    onRequestFriend()
                 },
             )
         }
@@ -209,6 +225,11 @@ fun ChatScreen(
                     viewModel = viewModel,
                     canDelete = state.canDelete,
                     isGroup = state.conversation?.isGroup == true,
+                    onRequestFriend = {
+                        viewModel.requestFriend { message ->
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
                 )
             },
         )

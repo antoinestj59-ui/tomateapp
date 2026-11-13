@@ -49,7 +49,7 @@ class NotificationRepository(private val api: SupabaseApi) {
         )
         return when (result) {
             is Outcome.Failure -> {
-                val message = result.error.userMessage
+                val message = result.error.technicalMessage + " " + result.error.userMessage
                 if (message.contains("PGRST205") || message.contains("does not exist") ||
                     message.contains("n'existe pas") || message.contains("schema cache")
                 ) {
@@ -119,6 +119,8 @@ class NotificationRepository(private val api: SupabaseApi) {
             "comment" -> "Commentaire"
             "join" -> "Communauté"
             "story" -> "Story"
+            "friend_request" -> "Demande d'ami"
+            "friend_accept" -> "Ami accepté"
             else -> "Notification"
         }
 

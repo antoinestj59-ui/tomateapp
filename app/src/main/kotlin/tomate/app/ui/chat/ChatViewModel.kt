@@ -58,6 +58,24 @@ class ChatViewModel(
         val QUICK_EMOJIS = listOf("🍅", "❤️", "👍", "😂", "😮", "🙏")
     }
 
+    /**
+     * Envoie une demande d'ami au contact de cette conversation 1-1.
+     * Le texte de retour est affiché tel quel : aucune confirmation n'est inventée.
+     */
+    fun requestFriend(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val peer = container.messaging.peerIdOf(conversationId)
+            if (peer == null) {
+                onResult("Demande impossible : ce destinataire n'est pas identifié.")
+                return@launch
+            }
+            when (val result = container.friends.send(peer)) {
+                is Outcome.Success -> onResult("Demande d'ami envoyée.")
+                is Outcome.Failure -> onResult(result.error.userMessage)
+            }
+        }
+    }
+
     /** État réel du chiffrement de CETTE conversation, avec vérification des clés. */
     data class SecurityUi(
         val label: String = "Vérification du chiffrement…",

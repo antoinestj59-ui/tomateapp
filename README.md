@@ -4,7 +4,7 @@ Réseau social **Android natif** et **PWA installable**, **offline-first**, en f
 communication locale **Bluetooth Low Energy** et **Wi-Fi**, relais multi-appareils, et
 synchronisation Supabase.
 
-> État : **version 0.1.2**, APK debug et PWA publiés en aperçu. Le compte se crée **avec ou
+> État : **version 0.6.0**, APK debug et PWA publiés en aperçu. Le compte se crée **avec ou
 > sans connexion**. Ce qui n'est pas testé est déclaré comme tel : lire [`STATUS.md`](STATUS.md)
 > avant toute démonstration.
 >
@@ -38,9 +38,10 @@ synchronisation Supabase.
 | Proximité BLE | ⚠️ | implémentation réelle (GATT serveur + client), **non testée sur matériel** |
 | Proximité Wi-Fi | ⚠️ | NSD + TCP réels, **non testés sur matériel** |
 | Relais multi-appareils | ⚠️ | moteur de politique testé en unitaire, **pas de test 3 téléphones** |
-| Chiffrement de bout en bout | ❌ | **non opérationnel et annoncé comme tel** |
-| Notifications push | ❌ | hors périmètre v0.1 |
+| Chiffrement de bout en bout | ⚠️ | 1-1 réel (P-256 + AES-GCM), groupes non chiffrés, pas de Double Ratchet |
+| Notifications push | ⚠️ | centre de notifications réel ; envoi FCM codé, jamais déclenché |
 | Restauration de compte | ❌ | nécessite une fonction serveur non déployée |
+| Demandes d'amis | ⚠️ | code livré, migration `0012` à appliquer |
 
 ## Démarrage rapide
 

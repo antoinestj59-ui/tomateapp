@@ -179,3 +179,15 @@ preuve réellement obtenue dans ce dépôt, ou l'absence de preuve.
 | Maillage : signature ECDSA vérifiée avant relais | livré (politique) | test signature altérée → rejet | — |
 | Affichage honnête du chiffrement | livré | chaque message : « 🔒 chiffré » / « non chiffré » ; message illisible dit comme tel | — |
 | Groupes chiffrés | **non** | — | aucune implémentation MLS retenue |
+
+## Itération 0.6.0 — amitiés et administration
+
+| Fonction | État | Preuve | Limite |
+|---|---|---|---|
+| Demande d'ami avec mot facultatif | livré (code) | `FriendsRepository.send` | migration 0012 à appliquer |
+| Accepter / refuser | livré (code) | `FriendsRepository.respond` + policy destinataire | non rejoué à deux comptes |
+| Demander pourquoi | livré (code) | message privé réel envoyé depuis `FriendsScreen` | — |
+| Notification de demande et d'acceptation | livré (code) | triggers 0012 | dépend de 0012 |
+| Administration communauté : demandes d'adhésion | livré (code) | onglet Admin, `setMemberStatus` | non vu sur appareil |
+| Rôles : nommer modérateur, retirer un membre | livré (code) | `setMemberRole`, `removeMember`, RLS staff | promotion réservée au propriétaire |
+| PWA à jour | déployé | `0.5.0-web`, cache v35 | interface d'amis absente |

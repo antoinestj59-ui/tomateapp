@@ -1,4 +1,4 @@
-# STATUS — TOMATE 0.5.0
+# STATUS — TOMATE 0.6.0
 
 Dernière vérification : **10 novembre 2026** (bac à sable cloud, JDK Temurin 21.0.13, Gradle 9.9.0, AGP 9.5.1, Node 26.13.0).
 
@@ -654,3 +654,42 @@ Dernière vérification : **10 novembre 2026**.
   production (5 contrôles HTTP en attente). L'appairage QR/NFC/lien fonctionne sans elle.
 - Toujours non faits : relais A→B→C sur trois téléphones, modération administrateur, appels de
   groupe, chiffrement de groupe.
+
+## 10. Itération 0.6.0 — demandes d'amis et administration des communautés
+
+Dernière vérification : **13 novembre 2026**.
+
+### Livré
+
+| Fonction | État réel | Preuve |
+|---|---|---|
+| Demandes d'amis (envoi, acceptation, refus, annulation) | **code livré** | `data/.../repo/FriendsRepository.kt`, `app/.../ui/friends/` |
+| Écran « Demandes d'amis » : Accepter / Refuser / **Demander pourquoi** | **compilé** | `FriendsScreen.kt` ; la question part en message privé réel |
+| Notification serveur à la réception et à l'acceptation | **code livré** | triggers `notify_friend_request` / `notify_friend_accept` (migration 0012) |
+| Accès depuis Messages et depuis les notifications | **compilé** | icône dédiée dans la barre de Messages, kind `friend_request` cliquable |
+| Envoi depuis une conversation | **compilé** | menu « Demander en ami » d'une conversation 1-1 (`ChatViewModel.requestFriend`) |
+| Administration de communauté : demandes d'adhésion, accepter/refuser, retirer, nommer modérateur | **code livré** | onglet `Admin` visible seulement pour `Owner`/`Moderator`, `CommunityRepository.setMemberStatus/setMemberRole` |
+| Membres en attente séparés des membres actifs | **code livré** | l'onglet Membres ne liste que `Active` |
+| PWA redéployée | **déployé et vérifié en HTTP** | `0.5.0-web`, cache `tomate-shell-v35`, `GET /health` → `{"ok":true}` |
+
+### Vérifications exécutées
+
+| Commande | Résultat |
+|---|---|
+| `:data:testDebugUnitTest` + `:app:testDebugUnitTest --rerun-tasks` | **BUILD SUCCESSFUL**, 50 + 8 tests, 0 échec |
+| `:app:assembleDebug` | **BUILD SUCCESSFUL**, `artifacts/tomate-0.6.0-debug.apk`, `versionCode 17` |
+| `sites_deploy` (preview) | **succeeded**, URL publiée, `published: true` |
+| `GET /js/config.js` en ligne | `APP_VERSION = '0.5.0-web'` (avant : `0.2.5-web`) |
+
+### Ce qui n'est pas encore possible — et pourquoi
+
+- **La migration `0012_amis.sql` doit être appliquée** par le propriétaire. Sans elle, l'écran
+  annonce « demandes d'amis non activées » au lieu d'afficher une liste vide : aucune donnée
+  inventée. C'est le seul geste qui manque pour que le parcours fonctionne de bout en bout.
+- **Aucun test avec deux comptes réels** sur les amitiés : la table n'existe pas encore côté
+  serveur, donc le parcours complet (A demande → B accepte → notification) n'a pas pu être rejoué.
+- Les demandes d'amis sont **en ligne uniquement** (pas de file hors ligne) : une demande exige
+  un compte serveur et une connexion, et l'échec est affiché tel quel.
+- **La PWA n'a pas encore l'interface d'amis** : elle est à jour sur le reste (0.5.0) mais ce
+  parcours est Android seulement pour l'instant.
+- Toujours aucun appareil : les écrans sont compilés, pas parcourus à la main.

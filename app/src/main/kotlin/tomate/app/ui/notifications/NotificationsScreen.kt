@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.ModeComment
 import androidx.compose.material.icons.filled.NotificationsNone
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -60,6 +61,7 @@ fun NotificationsScreen(
     onBack: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onOpenPost: (String) -> Unit,
+    onOpenFriends: () -> Unit = {},
     viewModel: NotificationsViewModel = viewModel(factory = tomateViewModelFactory { NotificationsViewModel(it) }),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -120,6 +122,8 @@ fun NotificationsScreen(
                                     onOpenConversation(conversation)
                                 notification.kind == "reaction" || notification.kind == "comment" ->
                                     notification.entityId?.let(onOpenPost)
+                                notification.kind == "friend_request" ||
+                                    notification.kind == "friend_accept" -> onOpenFriends()
                             }
                         },
                     )
@@ -137,6 +141,7 @@ private fun NotificationRow(notification: TomateNotification, onClick: () -> Uni
         "comment" -> Icons.Filled.ModeComment
         "join" -> Icons.Filled.Groups
         "story" -> Icons.Filled.PhotoCamera
+        "friend_request", "friend_accept" -> Icons.Filled.PersonAdd
         else -> Icons.Filled.NotificationsNone
     }
     Row(

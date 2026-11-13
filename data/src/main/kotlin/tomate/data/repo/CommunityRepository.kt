@@ -35,6 +35,8 @@ data class CommunityMember(
     val handle: String,
     val displayName: String,
     val role: String? = null,
+    /** `Active`, `Pending`, `Rejected`, `Banned` : le statut réel lu sur le serveur. */
+    val status: String? = null,
 )
 
 /**
@@ -224,6 +226,47 @@ class CommunityRepository(
         }
     }
 
+    /**
+     * Accepter (Active), refuser (Rejected) ou bannir (Banned) une adhésion.
+     * Réservé au propriétaire et aux modérateurs par la politique RLS `community_members_update_staff`.
+     */
+    suspend fun setMemberStatus(
+        communityId: String,
+        memberId: String,
+        status: MembershipStatus,
+    ): Outcome<Unit> = when (
+        val updated = api.update(
+            table = "community_members",
+            filter = listOf(
+                "community_id" to "eq.$communityId",
+                "user_id" to "eq.$memberId",
+            ),
+            body = """{"status":"${status.name}"}""",
+        )
+    ) {
+        is Outcome.Success -> Outcome.Success(Unit)
+        is Outcome.Failure -> updated
+    }
+
+    /** Promotion / rétrogradation, réservée au propriétaire (RLS). */
+    suspend fun setMemberRole(
+        communityId: String,
+        memberId: String,
+        role: CommunityRole,
+    ): Outcome<Unit> = when (
+        val updated = api.update(
+            table = "community_members",
+            filter = listOf(
+                "community_id" to "eq.$communityId",
+                "user_id" to "eq.$memberId",
+            ),
+            body = """{"role":"${role.name}"}""",
+        )
+    ) {
+        is Outcome.Success -> Outcome.Success(Unit)
+        is Outcome.Failure -> updated
+    }
+
     /** Moderator action: remove another member. Enforced by RLS (owner/moderator only). */
     suspend fun removeMember(communityId: String, memberId: String): Outcome<Unit> {
         val filter = listOf("community_id" to "eq.$communityId", "user_id" to "eq.$memberId")
@@ -244,7 +287,7 @@ class CommunityRepository(
             val result = api.select(
                 table = "community_members",
                 query = listOf(
-                    "select" to "user_id,role",
+                    "select" to "user_id,role,status",
                     "community_id" to "eq.$communityId",
                     "limit" to limit.toString(),
                 ),
@@ -292,6 +335,16 @@ class CommunityRepository(
                 .toMap()
         }.getOrDefault(emptyMap())
 
+        val statuses = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(rows).jsonArray
+                .mapNotNull { element ->
+                    val obj = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                    val id = obj["user_id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    id to obj["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                }
+                .toMap()
+        }.getOrDefault(emptyMap())
+
         val roles = runCatching {
             kotlinx.serialization.json.Json.parseToJsonElement(rows).jsonArray
                 .mapNotNull { element ->
@@ -304,7 +357,10 @@ class CommunityRepository(
 
         return Outcome.Success(
             ids.mapNotNull { id ->
-                byId[id]?.copy(role = roles[id]?.takeIf { it.isNotBlank() })
+                byId[id]?.copy(
+                    role = roles[id]?.takeIf { it.isNotBlank() },
+                    status = statuses[id]?.takeIf { it.isNotBlank() },
+                )
             },
         )
     }

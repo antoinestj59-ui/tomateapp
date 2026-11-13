@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonSearch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,6 +32,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -66,6 +68,7 @@ fun MessagesScreen(
     onOpenConversation: (String) -> Unit,
     openComposerRequest: Boolean = false,
     onComposerRequestConsumed: () -> Unit = {},
+    onOpenFriends: () -> Unit = {},
     viewModel: MessagesViewModel = viewModel(factory = tomateViewModelFactory { MessagesViewModel(it) }),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -92,6 +95,9 @@ fun MessagesScreen(
             TopAppBar(
                 title = { Text("Messages", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = onOpenFriends) {
+                        Icon(Icons.Filled.PersonAdd, contentDescription = "Demandes d'amis")
+                    }
                     Box(
                         modifier = Modifier
                             .padding(end = TomateSpacing.s)

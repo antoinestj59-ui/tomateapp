@@ -30,6 +30,7 @@ class CommunityDetailViewModel(
         val error: AppError? = null,
         val canPost: Boolean = false,
         val isModerator: Boolean = false,
+        val isOwner: Boolean = false,
         val members: List<tomate.data.repo.CommunityMember> = emptyList(),
         val membersLoading: Boolean = false,
     )
@@ -59,6 +60,7 @@ class CommunityDetailViewModel(
             busy = actionTriple.second,
             error = actionTriple.third,
             canPost = membership == MembershipStatus.Active,
+            isOwner = community?.myRole == tomate.core.model.CommunityRole.Owner,
             isModerator = community?.myRole == tomate.core.model.CommunityRole.Owner ||
                 community?.myRole == tomate.core.model.CommunityRole.Moderator,
             members = membersPair.first,
@@ -146,6 +148,47 @@ class CommunityDetailViewModel(
         viewModelScope.launch {
             val result = container.feed.toggleReaction(post.id, post.reactedByMe)
             if (result is Outcome.Failure && !result.error.isOffline) error.value = result.error
+        }
+    }
+
+    /** Accepter ou refuser une demande d'adhésion (propriétaire / modérateur). */
+    fun decide(member: tomate.data.repo.CommunityMember, accept: Boolean) {
+        admin {
+            container.communities.setMemberStatus(
+                communityId = communityId,
+                memberId = member.id,
+                status = if (accept) MembershipStatus.Active else MembershipStatus.Rejected,
+            )
+        }
+    }
+
+    fun removeMember(member: tomate.data.repo.CommunityMember) {
+        admin { container.communities.removeMember(communityId, member.id) }
+    }
+
+    fun promote(member: tomate.data.repo.CommunityMember) {
+        admin {
+            container.communities.setMemberRole(
+                communityId = communityId,
+                memberId = member.id,
+                role = tomate.core.model.CommunityRole.Moderator,
+            )
+        }
+    }
+
+    /** Toute action d'administration recharge la vérité serveur : aucune liste locale optimiste. */
+    private fun admin(action: suspend () -> Outcome<Unit>) {
+        viewModelScope.launch {
+            busy.value = true
+            error.value = null
+            when (val result = action()) {
+                is Outcome.Success -> {
+                    loadMembers()
+                    runCatching { container.communities.refresh() }
+                }
+                is Outcome.Failure -> error.value = result.error
+            }
+            busy.value = false
         }
     }
 

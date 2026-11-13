@@ -303,3 +303,9 @@ Puis vérifier en réel :
 Sans cette migration, l'appairage (QR/lien/NFC) et le chiffrement fonctionnent quand même entre
 deux personnes qui se sont appairées : seule la découverte automatique des clés par l'annuaire est
 indisponible.
+
+### Migration `0012_amis.sql` — demandes d'amis
+
+À exécuter après `0011`. Elle crée `friend_requests`, ses politiques (seul le destinataire
+répond), `public.are_friends(a, b)` et les deux notifications (`friend_request`,
+`friend_accept`). Sans elle, l'écran « Demandes d'amis » l'annonce explicitement.

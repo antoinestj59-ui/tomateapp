@@ -5,6 +5,18 @@ import kotlinx.serialization.Serializable
 
 /** Wire DTOs. They mirror the SQL schema in supabase/migrations/ and nothing more. */
 
+/** Demande d'amis (migration 0012) : une ligne réelle, jamais un compteur. */
+@Serializable
+data class FriendRequestDto(
+    val id: String,
+    @SerialName("from_id") val fromId: String,
+    @SerialName("to_id") val toId: String,
+    val note: String? = null,
+    val status: String = "Pending",
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("responded_at") val respondedAt: String? = null,
+)
+
 @Serializable
 data class ProfileDto(
     val id: String,

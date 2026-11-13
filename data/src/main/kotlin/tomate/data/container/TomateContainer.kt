@@ -17,6 +17,7 @@ import tomate.data.network.NetworkMonitor
 import tomate.data.repo.CommunityRepository
 import tomate.data.repo.E2eeRepository
 import tomate.data.repo.FeedRepository
+import tomate.data.repo.FriendsRepository
 import tomate.data.repo.MessagingRepository
 import tomate.data.repo.ModerationRepository
 import tomate.data.repo.NotificationRepository
@@ -99,6 +100,8 @@ class TomateContainer(
         )
     }
     val notifications: NotificationRepository by lazy { NotificationRepository(api) }
+    /** Demandes d'amis : lues et écrites sur le serveur (migration 0012). */
+    val friends: FriendsRepository by lazy { FriendsRepository(api, session) }
     val moderation: ModerationRepository by lazy {
         ModerationRepository(api, database.blockDao(), database.outboxDao(), session)
     }

@@ -55,6 +55,7 @@ import kotlinx.coroutines.flow.map
 import tomate.app.ui.chat.ChatScreen
 import tomate.app.ui.communities.CommunitiesScreen
 import tomate.app.ui.communities.CommunityDetailScreen
+import tomate.app.ui.friends.FriendsScreen
 import tomate.app.ui.home.HomeScreen
 import tomate.app.ui.messages.MessagesScreen
 import tomate.app.ui.nearby.NearbyScreen
@@ -185,6 +186,13 @@ fun TomateApp(
                         onBack = { navController.popBackStack() },
                         onOpenConversation = { navController.navigate(TomateRoutes.chat(it)) },
                         onOpenPost = { navController.navigate(TomateRoutes.postDetail(it)) },
+                        onOpenFriends = { navController.navigate(TomateRoutes.FRIENDS) },
+                    )
+                }
+                composable(TomateRoutes.FRIENDS) {
+                    FriendsScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenConversation = { navController.navigate(TomateRoutes.chat(it)) },
                     )
                 }
                 composable(TomateDestination.Messages.route) {
@@ -192,6 +200,7 @@ fun TomateApp(
                         onOpenConversation = { navController.navigate(TomateRoutes.chat(it)) },
                         openComposerRequest = openConversationRequest,
                         onComposerRequestConsumed = { openConversationRequest = false },
+                        onOpenFriends = { navController.navigate(TomateRoutes.FRIENDS) },
                     )
                 }
                 composable(

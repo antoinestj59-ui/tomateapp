@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -83,6 +84,12 @@ fun CommunityDetailScreen(
     var tab by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
     val community = state.community
+    // Un onglet d'administration n'apparaît que pour un rôle réel (propriétaire ou modérateur).
+    val tabs = if (state.isModerator) {
+        listOf("Publications", "Membres", "Admin", "À propos")
+    } else {
+        listOf("Publications", "Membres", "À propos")
+    }
 
     if (state.loading && community == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -226,7 +233,7 @@ fun CommunityDetailScreen(
                 containerColor = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.padding(top = TomateSpacing.s),
             ) {
-                listOf("Publications", "Membres", "À propos").forEachIndexed { index, title ->
+                tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = tab == index,
                         onClick = { tab = index },
@@ -334,7 +341,7 @@ fun CommunityDetailScreen(
                             onAction = viewModel::reloadMembers,
                         )
                     }
-                    else -> items(state.members, key = { it.id }) { member ->
+                    else -> items(state.members.filter { it.status == null || it.status == "Active" }, key = { it.id }) { member ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -365,27 +372,154 @@ fun CommunityDetailScreen(
                 }
             }
 
-            else -> item {
-                Column(modifier = Modifier.padding(TomateSpacing.l)) {
-                    Text("À propos", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(TomateSpacing.s))
-                    Text(
-                        text = community?.description?.ifBlank { "Aucune description fournie." }
-                            ?: "Communauté indisponible.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(TomateSpacing.s))
-                    Row(horizontalArrangement = Arrangement.spacedBy(TomateSpacing.s)) {
-                        MetricPill(text = "${compactCount(community?.memberCount ?: 0)} membres")
-                        community?.visibility?.let { MetricPill(text = it.label) }
-                        community?.myMembership?.let { MetricPill(text = it.label()) }
+            2 -> if (state.isModerator) {
+                item { ModerationSection(state, viewModel) }
+            } else {
+                item { AboutSection(community) }
+            }
+
+            else -> item { AboutSection(community) }
+        }
+    }
+}
+
+/** Onglet « À propos » : uniquement les données du serveur, aucune statistique inventée. */
+@Composable
+private fun AboutSection(community: tomate.core.model.Community?) {
+    Column(modifier = Modifier.padding(TomateSpacing.l)) {
+        Text("À propos", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(TomateSpacing.s))
+        Text(
+            text = community?.description?.ifBlank { "Aucune description fournie." }
+                ?: "Communauté indisponible.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(TomateSpacing.s))
+        Row(horizontalArrangement = Arrangement.spacedBy(TomateSpacing.s)) {
+            MetricPill(text = "${compactCount(community?.memberCount ?: 0)} membres")
+            community?.visibility?.let { MetricPill(text = it.label) }
+            community?.myMembership?.let { MetricPill(text = it.label()) }
+        }
+        Spacer(Modifier.height(TomateSpacing.s))
+        Text(
+            text = "Identifiant : ${community?.slug ?: "—"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Onglet « Admin » : accepter ou refuser les demandes d'adhésion, gérer les rôles.
+ *
+ * Chaque bouton écrit sur `community_members` ; la politique RLS refuse l'action à un simple
+ * membre. En cas de refus serveur, le message est affiché tel quel : rien n'est simulé.
+ */
+@Composable
+private fun ModerationSection(
+    state: CommunityDetailViewModel.UiState,
+    viewModel: CommunityDetailViewModel,
+) {
+    val pending = state.members.filter { it.status == "Pending" }
+    val active = state.members.filter { it.status == null || it.status == "Active" }
+
+    Column(modifier = Modifier.padding(TomateSpacing.l)) {
+        Text(
+            text = "Demandes d'adhésion",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(TomateSpacing.s))
+        if (pending.isEmpty()) {
+            Text(
+                text = "Aucune demande en attente.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            pending.forEach { member ->
+                Column(modifier = Modifier.fillMaxWidth().padding(vertical = TomateSpacing.s)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TomateAvatar(label = member.displayName.ifBlank { member.handle }, size = 40)
+                        Spacer(Modifier.width(TomateSpacing.m))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = member.displayName.ifBlank { member.handle },
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "@${member.handle}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        MetricPill(text = "En attente")
                     }
-                    Spacer(Modifier.height(TomateSpacing.s))
-                    Text(
-                        text = "Identifiant : ${community?.slug ?: "—"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Spacer(Modifier.height(TomateSpacing.xs))
+                    Row(horizontalArrangement = Arrangement.spacedBy(TomateSpacing.s)) {
+                        TomatePrimaryButton(
+                            text = "Accepter",
+                            onClick = { viewModel.decide(member, accept = true) },
+                            enabled = !state.busy,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TomateTonalButton(
+                            text = "Refuser",
+                            onClick = { viewModel.decide(member, accept = false) },
+                            enabled = !state.busy,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(TomateSpacing.l))
+        Text(
+            text = "Membres et rôles",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(TomateSpacing.xs))
+        if (active.isEmpty()) {
+            Text(
+                text = "Aucun membre actif à gérer.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            active.forEach { member ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = TomateSpacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = member.displayName.ifBlank { member.handle },
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "@${member.handle}" + (member.role?.let { " · $it" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (member.role != "Owner") {
+                        if (state.isOwner && member.role != "Moderator") {
+                            TextButton(
+                                onClick = { viewModel.promote(member) },
+                                enabled = !state.busy,
+                            ) { Text("Modérateur") }
+                        }
+                        TextButton(
+                            onClick = { viewModel.removeMember(member) },
+                            enabled = !state.busy,
+                        ) { Text("Retirer") }
+                    }
                 }
             }
         }
