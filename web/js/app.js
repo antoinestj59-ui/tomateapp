@@ -34,6 +34,7 @@ import {
   pairingLink,
   savePeerKeys,
 } from './e2ee.js';
+import { createChessUi } from './chess-ui.js';
 import {
   cachedWeather,
   describeCode,
@@ -383,6 +384,7 @@ const ICON = {
   bell: svg('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
   chart: svg('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
   phone: svg('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z"/>'),
+  chess: svg('<path d="M7 20h10"/><path d="M8.5 17.5h7L14 9l2.5-3.5L12 3 7.5 5.5 10 9l-1.5 8.5Z"/><path d="M9 20v-1.5h6V20"/>'),
   camera: svg('<rect x="2" y="6" width="14" height="12" rx="3"/><path d="m16 11 6-3.5v9L16 13Z"/>'),
 };
 
@@ -399,7 +401,7 @@ const LOGO = `<svg class="logo-mark" viewBox="0 0 32 32" fill="none" aria-hidden
 const NAV = [
   { id: 'feed', label: 'Accueil', icon: ICON.home, route: '#/feed' },
   { id: 'messages', label: 'Messages', icon: ICON.messages, route: '#/messages' },
-  { id: 'network', label: 'Réseau', icon: ICON.network, route: '#/network' },
+  { id: 'chess', label: 'Échecs', icon: ICON.chess, route: '#/chess' },
   { id: 'communities', label: 'Groupes', icon: ICON.communities, route: '#/communities' },
   { id: 'profile', label: 'Profil', icon: ICON.profile, route: '#/profile' },
 ];
@@ -3012,6 +3014,9 @@ async function navigate() {
     case 'weather':
       render();
       break;
+    case 'chess':
+      render();
+      break;
     case 'network':
       render();
       await refreshCounts();
@@ -3044,11 +3049,24 @@ function view() {
     case 'search': return searchView();
     case 'network': return networkView();
     case 'weather': return weatherView();
+    case 'chess': return chessView();
     case 'notifications': return notificationsView();
     case 'profile': return profileView();
     case 'settings': return settingsView();
     default: return feedView();
   }
+}
+
+let chessUiInstance = null;
+function chessUi() {
+  if (!chessUiInstance) {
+    chessUiInstance = createChessUi({ S, render, toast, esc, shell });
+  }
+  return chessUiInstance;
+}
+
+function chessView() {
+  return chessUi().view();
 }
 
 function render() {
@@ -3110,6 +3128,9 @@ document.addEventListener('click', async (event) => {
         else location.hash = target;
         break;
       }
+      case 'chess':
+        await chessUi().handle(trigger.dataset.op, trigger.dataset.arg, trigger);
+        break;
       case 'refresh':
         await Promise.all([loadFeed({ refresh: true }), loadStories({ refresh: true })]);
         await syncNow({ silent: true });
